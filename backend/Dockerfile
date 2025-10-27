@@ -7,6 +7,6 @@ RUN mkdir /opt/obs-planner
 WORKDIR /opt/obs-planner
 ADD . .
 
-EXPOSE 1323
+EXPOSE 80
 
 CMD go run server.go

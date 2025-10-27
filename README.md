@@ -2,17 +2,36 @@
 Graphical astronomical observations planning utility
 
 # Setup
-- Install AWS CLI and credentials
+- Install AWS CLI and set up SSO
+- Install AWS CDK
 - Install docker
 - Install golang
 
-# Build and run backend
-`cd backend`
+# Build backend image
+`cd backend
+make build`
 
-## One-time init
-`go mod init backend
-go get github.com/labstack/echo/v4`
+## Push the latest backend image
+`cd backend
+make push`
 
-## Build and run
-`go run server.go`
+## Build and run the backend locally
+`cd backend
+make runserver`
 
+# Set up CDK (one-time setup in the repo)
+`mkdir obs-ecs
+cd obs-ecs
+cdk bootstrap
+cdk init --language python`
+
+# Init CDK
+`cd obs-ecs
+source .venv/bin/activate
+pip install -r requirements.txt`
+
+# Deployment cycle of the built and pushed image
+`cd obs-ecs
+cdk synth
+cdk deploy
+cdk destroy`

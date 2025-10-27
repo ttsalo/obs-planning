@@ -1,12 +1,25 @@
-runserver:
+include ../Makefile
+
+AWS_REPOSITORY_URI=`jq -r .repository.repositoryUri repository.json`
+
+build:
 	docker build -t obs-planner-server .
-	docker run -t -i -p 1323:1323 obs-planner-server
+	docker tag obs-planner-server $(AWS_REPOSITORY_URI)
+
+push:
+	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
+	docker push $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com/obs-planner-repository
+
+runserver: build
+	docker run -t -i -p 8080:80 obs-planner-server
 
 runshell:
 	docker run -t -i obs-planner-server bash
 
-# aws ecr create-repository --repository-name hello-repository --region <region>
-# docker tag hello-world <repositoryUri>
-# aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <aws_account_id>.dkr.ecr.<region>.amazonaws.com
-# docker push <aws_account_id>.dkr.ecr.<region>.amazonaws.com/hello-repository
-# aws ecr delete-repository --repository-name hello-repository --region <region> --force
+createrepository:
+	aws ecr create-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) > repository.json
+
+deleterepository:
+	aws ecr delete-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) --force
+
+
