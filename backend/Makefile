@@ -1,4 +1,4 @@
-include ../Makefile
+include ../defines.mk
 
 AWS_REPOSITORY_URI=`jq -r .repository.repositoryUri repository.json`
 

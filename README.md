@@ -6,32 +6,37 @@ Graphical astronomical observations planning utility
 - Install AWS CDK
 - Install docker
 - Install golang
+- Install node.js: `nvm install 22`
+
+# Set up React Router (one-time setup in the repo)
+```cd backend
+npm create vite@latest```
 
 # Build backend image
-`cd backend
-make build`
+```make build```
+
+# Run backend image locally
+```make runserver```
 
 ## Push the latest backend image
-`cd backend
-make push`
-
-## Build and run the backend locally
-`cd backend
-make runserver`
+```cd backend
+make push```
 
 # Set up CDK (one-time setup in the repo)
-`mkdir obs-ecs
+```mkdir obs-ecs
 cd obs-ecs
 cdk bootstrap
-cdk init --language python`
+cdk init --language python
+source .venv/bin/activate
+pip install -r requirements.txt```
 
 # Init CDK
-`cd obs-ecs
-source .venv/bin/activate
-pip install -r requirements.txt`
+```cd obs_ecs
+source .venv/bin/activate```
+`aws sso login` if needed
 
 # Deployment cycle of the built and pushed image
-`cd obs-ecs
+```cd obs_ecs
 cdk synth
 cdk deploy
-cdk destroy`
+cdk destroy```

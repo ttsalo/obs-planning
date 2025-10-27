@@ -1,2 +1,8 @@
-AWS_REGION=eu-north-1
-AWS_REPOSITORY=obs-planner-repository
+include defines.mk
+
+build:
+	(cd obs-ui && npm run build && cp -a dist/* ../backend/static/)
+	make -C backend build
+
+runserver: build
+	make -C backend runserver
