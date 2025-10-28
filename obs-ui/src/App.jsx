@@ -1,35 +1,19 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import React from 'react';
+import { Layout } from 'antd';
 
-function App() {
-  const [count, setCount] = useState(0)
+const App = () => {
+    return <Layout style={{ minHeight: '100vh', minWidth: '100vw' }}>
+	       <Layout.Header style={{ padding: 0 }}>header</Layout.Header>
+	       <Layout>
+		   <Layout.Content>
+		       <div style={{padding: 24, minHeight: '100%',
+				    minWidth: '100%',}}>
+			   <h1>Full Screen Content</h1>
+		       </div>
+		   </Layout.Content>
+	       </Layout>
+	       <Layout.Footer style={{ padding: 0 }}>footer</Layout.Footer>
+	   </Layout>
+};
 
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
-}
-
-export default App
+export default App;

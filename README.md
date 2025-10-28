@@ -8,7 +8,7 @@ Graphical astronomical observations planning utility
 - Install golang
 - Install node.js: `nvm install 22`
 
-# Set up React Router (one-time setup in the repo)
+# Set up React (one-time setup in the repo)
 ```cd backend
 npm create vite@latest```
 
