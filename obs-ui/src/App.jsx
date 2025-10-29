@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Layout } from 'antd';
+import { Button, Flex, Layout, ConfigProvider, Typography } from 'antd';
 import { Stage, Layer, Rect, Circle, Text } from 'react-konva';
 import axios from 'axios';
 
@@ -9,7 +9,7 @@ const ObsStage = () => {
     const session = useContext(SessionContext)
     return (
 	<Layer>
-	    <Text text={session.testing} fontSize={15} />
+	    <Text className="header" text={session?.testing} fontSize={15} />
 	    <Rect
 		x={20}
 		y={50}
@@ -91,7 +91,14 @@ const App = () => {
 
     return <SessionContext value={session}>
 	       <Layout style={{ minHeight: '100vh', minWidth: '100vw' }}>
-		   <Layout.Header style={{ padding: 0 }}>header</Layout.Header>
+		   <Layout.Header>
+		       <ConfigProvider theme={{token:
+					       {colorText: '#e0e0e0'}}}>
+			   <Typography.Title level={3}>
+			       Observations Planner
+			   </Typography.Title>
+		       </ConfigProvider>
+		   </Layout.Header>
 		   <Layout>
 		       <Layout.Content>
 			   <div ref={containerRef}
@@ -108,7 +115,12 @@ const App = () => {
 			   </div>
 		       </Layout.Content>
 		   </Layout>
-		   <Layout.Footer style={{ padding: 0 }}>footer</Layout.Footer>
+		   <Layout.Footer style={{ padding: 0 }}>
+		       <Flex justify="center" align="middle"
+			     style={{ height: '100%' }}>
+			   © Tomi T. Salo 2025
+		       </Flex>
+		   </Layout.Footer>
 	       </Layout>
 	   </SessionContext>
 };
