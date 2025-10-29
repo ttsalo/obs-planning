@@ -1,7 +1,8 @@
 include defines.mk
 
 build:
-	(cd obs-ui && npm run build && cp -a dist/* ../backend/static/)
+	(cd obs-ui && npm run build && cp -a dist/* ../backend/static/ && \
+	cp -a src/assets/favicon.ico ../backend/static/)
 	make -C backend build
 
 runserver: build

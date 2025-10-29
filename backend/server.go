@@ -8,6 +8,9 @@ import (
     "github.com/labstack/echo/v4"
 )
 
+/* Decode the session cookie and return the contents to the frontend,
+or create a new cookie. The cookie is opaque to the frontend, so
+this is how the frontend accesses the contents. */
 func getSession(c echo.Context) error {
     cookie, err := c.Cookie("obs-session")
     if err != nil || cookie.Valid() != nil {
@@ -21,14 +24,17 @@ func getSession(c echo.Context) error {
 	c.SetCookie(new_cookie)
 	return c.JSON(http.StatusOK, cookie_data)
     }
+
     b, err := base64.URLEncoding.DecodeString(cookie.Value)
     if err != nil {
 	return c.JSON(http.StatusBadRequest, "Failed to decode Base64")
     }
+
     var cookie_data map[string]any
     if err := json.Unmarshal(b, &cookie_data); err != nil {
 	return c.JSON(http.StatusBadRequest, "Failed to unmarshal JSON")
     }
+
     return c.JSON(http.StatusOK, cookie_data)
 }
 
