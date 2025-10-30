@@ -2,33 +2,8 @@ import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Button, Flex, Layout, ConfigProvider, Typography } from 'antd';
 import { Stage, Layer, Rect, Circle, Text } from 'react-konva';
 import axios from 'axios';
-
-const SessionContext = createContext(null);
-
-const ObsStage = () => {
-    const session = useContext(SessionContext)
-    return (
-	<Layer>
-	    <Text className="header" text={session?.testing} fontSize={15} />
-	    <Rect
-		x={20}
-		y={50}
-		width={100}
-		height={100}
-		fill="red"
-		shadowBlur={10}
-		draggable
-	    />
-	    <Circle
-		x={200}
-		y={100}
-		radius={50}
-		fill="green"
-		draggable
-	    />
-	</Layer>
-    )
-};
+import ObsStage from './obs.jsx';
+import { SessionContext } from './session.jsx'
 
 const App = () => {
     // Global session context 
