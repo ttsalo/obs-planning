@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Button, Flex, Layout, ConfigProvider, Typography, Input,
-	 Space } from 'antd';
+	 Space, Modal } from 'antd';
 import { Stage, Layer, Rect, Circle, Text } from 'react-konva';
 import axios from 'axios';
 import ObsStage from './obs.jsx';
@@ -65,6 +65,17 @@ const App = () => {
 	};
     }, []);
 
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const showModal = () => {
+	setIsModalOpen(true);
+    };
+    const handleOk = () => {
+	setIsModalOpen(false);
+    };
+    const handleCancel = () => {
+	setIsModalOpen(false);
+    };
+    
     return <SessionContext value={session}>
 	       <Layout style={{ minHeight: '100vh', minWidth: '100vw' }}>
 		   <Layout.Header>
@@ -91,7 +102,25 @@ const App = () => {
 					   {session?.lon}
 				       </Typography.Text>
 				   </Space.Compact>
-			       <Button type="primary">Set</Button>
+				   <Button type="primary"
+					   onClick={showModal}>
+				       Set
+				   </Button>
+				   <ConfigProvider
+				       theme={{token:
+					       {colorText: 'black'}}}>
+				       <Modal
+					   title="Set observation parameters"
+					   closable={{ 'aria-label':
+						       'Close' }}
+					   open={isModalOpen}
+					   onOk={handleOk}
+					   onCancel={handleCancel}>
+					   <p>Some contents...</p>
+					   <p>Some contents...</p>
+					   <p>Some contents...</p>
+				       </Modal>
+				   </ConfigProvider>
 			       </Space>
 			   </Flex>
 		       </ConfigProvider>
