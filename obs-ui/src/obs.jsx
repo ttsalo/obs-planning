@@ -6,7 +6,6 @@ const ObsStage = () => {
     const session = useContext(SessionContext)
     return (
 	<Layer>
-	    <Text className="header" text={session?.testing} fontSize={15} />
 	    <Rect
 		x={20}
 		y={50}

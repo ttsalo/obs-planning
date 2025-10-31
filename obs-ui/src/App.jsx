@@ -1,10 +1,10 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Button, Flex, Layout, ConfigProvider, Typography, Input,
-	 Space, Modal } from 'antd';
+import { Button, Flex, Layout, ConfigProvider, Typography, Input, InputNumber,
+	 Space, Modal, Row, Col } from 'antd';
 import { Stage, Layer, Rect, Circle, Text } from 'react-konva';
 import axios from 'axios';
 import ObsStage from './obs.jsx';
-import { SessionContext } from './session.jsx'
+import { SessionContext, updateSession } from './session.jsx'
 
 const App = () => {
     // Global session context 
@@ -69,13 +69,52 @@ const App = () => {
     const showModal = () => {
 	setIsModalOpen(true);
     };
-    const handleOk = () => {
-	setIsModalOpen(false);
-    };
-    const handleCancel = () => {
-	setIsModalOpen(false);
-    };
     
+    const SetDialog = () => {
+	const handleOk = () => {
+	    setIsModalOpen(false);
+	    updateSession(session, setSession, {"lat": lat, "lon": lon});
+	};
+	const handleCancel = () => {
+	    setIsModalOpen(false);
+	};
+	const [lat, setLat] = useState(session?.lat);
+	const [lon, setLon] = useState(session?.lon);
+
+	return <ConfigProvider
+		   theme={{token:
+			   {colorText: 'black'}}}>
+		   <Modal
+		       title="Set observation parameters"
+		       closable={{ 'aria-label':
+				   'Set' }}
+		       open={isModalOpen}
+		       onOk={handleOk}
+		       onCancel={handleCancel}>
+		       <Row>
+			   <Col className="gutter-row" span={12}>
+			       <Typography.Text>Latitude</Typography.Text>
+			   </Col>
+			   <Col className="gutter-row" span={12}>
+			       <Typography.Text>Longitude</Typography.Text>
+			   </Col>
+		       </Row>
+		       <Row>
+			   <Col className="gutter-row" span={12}>
+			       <InputNumber min={-90} max={90} value={lat}
+					    onChange={setLat}>
+			       </InputNumber>
+			   </Col>
+			   <Col className="gutter-row" span={12}>
+			       <InputNumber min={-180} max={180} value={lon}
+					    onChange={setLon}>
+			       </InputNumber>
+			   </Col>
+		       </Row>
+		   </Modal>
+	       </ConfigProvider>
+    };
+
     return <SessionContext value={session}>
 	       <Layout style={{ minHeight: '100vh', minWidth: '100vw' }}>
 		   <Layout.Header>
@@ -106,21 +145,8 @@ const App = () => {
 					   onClick={showModal}>
 				       Set
 				   </Button>
-				   <ConfigProvider
-				       theme={{token:
-					       {colorText: 'black'}}}>
-				       <Modal
-					   title="Set observation parameters"
-					   closable={{ 'aria-label':
-						       'Close' }}
-					   open={isModalOpen}
-					   onOk={handleOk}
-					   onCancel={handleCancel}>
-					   <p>Some contents...</p>
-					   <p>Some contents...</p>
-					   <p>Some contents...</p>
-				       </Modal>
-				   </ConfigProvider>
+				   <SetDialog>
+				   </SetDialog>
 			       </Space>
 			   </Flex>
 		       </ConfigProvider>
