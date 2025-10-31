@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Button, Flex, Layout, ConfigProvider, Typography } from 'antd';
+import { Button, Flex, Layout, ConfigProvider, Typography, Input,
+	 Space } from 'antd';
 import { Stage, Layer, Rect, Circle, Text } from 'react-konva';
 import axios from 'axios';
 import ObsStage from './obs.jsx';
@@ -69,11 +70,33 @@ const App = () => {
 		   <Layout.Header>
 		       <ConfigProvider theme={{token:
 					       {colorText: '#e0e0e0'}}}>
-			   <Typography.Title level={3}>
-			       Observations Planner
-			   </Typography.Title>
+			   <Flex justify="space-between" align="center">
+			       <Typography.Title level={3}>
+				   Observations Planner
+			       </Typography.Title>
+			       <Space>
+				   <Space.Compact>
+				       <Typography.Text strong={true}>
+					   Lat:
+				       </Typography.Text>
+				       <Typography.Text>
+					   {session?.lat}
+				       </Typography.Text>
+				   </Space.Compact>
+				   <Space.Compact>
+				       <Typography.Text strong={true}>
+					   Lon:
+				       </Typography.Text>
+				       <Typography.Text>
+					   {session?.lon}
+				       </Typography.Text>
+				   </Space.Compact>
+			       <Button type="primary">Set</Button>
+			       </Space>
+			   </Flex>
 		       </ConfigProvider>
 		   </Layout.Header>
+		   
 		   <Layout>
 		       <Layout.Content>
 			   <div ref={containerRef}
@@ -90,6 +113,7 @@ const App = () => {
 			   </div>
 		       </Layout.Content>
 		   </Layout>
+		   
 		   <Layout.Footer style={{ padding: 0 }}>
 		       <Flex justify="center" align="middle"
 			     style={{ height: '100%' }}>

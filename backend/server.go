@@ -18,6 +18,8 @@ func getSession(c echo.Context) error {
 	new_cookie := new(http.Cookie)
 	new_cookie.Name = "obs-session"
 	cookie_data := make(map[string]any)
+	cookie_data["lat"] = 0.0
+	cookie_data["lon"] = 0.0
 	cookie_data["testing"] = "Foobar"
 	b, _ := json.Marshal(cookie_data)
 	new_cookie.Value = base64.URLEncoding.EncodeToString(b)
