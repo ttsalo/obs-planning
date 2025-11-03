@@ -11,4 +11,4 @@ ADD . .
 
 EXPOSE 80
 
-CMD go run server.go
+CMD ["go", "run", "server.go"]

@@ -4,7 +4,7 @@ import { Button, Flex, Layout, ConfigProvider, Typography, Input, InputNumber,
 import { Stage, Layer, Rect, Circle, Text } from 'react-konva';
 import axios from 'axios';
 import ObsStage from './obs.jsx';
-import { SessionContext, updateSession } from './session.jsx'
+import { SessionContext, StageContext, updateSession } from './session.jsx'
 
 const App = () => {
     // Global session context 
@@ -26,13 +26,32 @@ const App = () => {
     // Define virtual size for our scene
     const sceneWidth = 1000;
     const sceneHeight = 500;
+
+    // Calculate the alt-az limits of the visible area
+    function calcLimits(stageMap) {
+	let w = stageMap.get("width");
+	let h = stageMap.get("height");
+	stageMap.set("minAz", stageMap.get("aimAz") -
+		     (w/2 / stageMap.get("zoom")));
+	stageMap.set("maxAz", stageMap.get("aimAz") +
+		     (w/2 / stageMap.get("zoom")));
+	stageMap.set("minAlt", stageMap.get("aimAlt") -
+		     (h/2 / stageMap.get("zoom")));
+	stageMap.set("maxAlt", stageMap.get("aimAlt") +
+		     (h/2 / stageMap.get("zoom")));
+    };
     
     // State to track current scale and dimensions
-    const [stageSize, setStageSize] = useState({
-	width: sceneWidth,
-	height: sceneHeight,
-	scale: 1
-    });
+    var stageMap = new Map();
+    stageMap.set("width", sceneWidth);
+    stageMap.set("height", sceneHeight);
+    stageMap.set("scale", 1.0);
+    stageMap.set("aimAz", 180.0);
+    stageMap.set("aimAlt", 45.0);
+    stageMap.set("zoom", 10.0);
+    calcLimits(stageMap);
+    
+    const [stageSize, setStageSize] = useState(stageMap)
     
     // Reference to parent container
     const containerRef = useRef(null);
@@ -48,11 +67,11 @@ const App = () => {
 	const scale = containerWidth / sceneWidth;
 	
 	// Update state with new dimensions
-	setStageSize({
-	    width: sceneWidth * scale,
-	    height: sceneHeight * scale,
-	    scale: scale
-	});
+	stageMap = stageSize;
+	stageMap.set("width", sceneWidth * scale);
+	stageMap.set("height", sceneHeight * scale);
+	stageMap.set("scale", scale);
+	setStageSize(stageMap);
     };
   
     // Update on mount and when window resizes
@@ -158,12 +177,14 @@ const App = () => {
 				style={{padding: 0, minHeight: '100%',
 					minWidth: '100%',}}>
 			       <Stage
-				   width={stageSize.width} 
-				   height={stageSize.height}
-				   scaleX={stageSize.scale}
-				   scaleY={stageSize.scale}>
-				   <ObsStage>
-				   </ObsStage>
+				   width={stageSize.get("width")} 
+				   height={stageSize.get("height")}
+				   scaleX={stageSize.get("scale")}
+				   scaleY={stageSize.get("scale")}>
+				   <StageContext value={stageSize}>
+				       <ObsStage>
+				       </ObsStage>
+				   </StageContext>
 			       </Stage>
 			   </div>
 		       </Layout.Content>

@@ -32,3 +32,19 @@ export function updateSession(session, setSession, updated) {
     updateData();
 };
 
+/* Details about what we are showing in the stage area. This doesn't
+   need to be persistent beyond the UI component lifetime. Used by the
+   ObsStage component to determine what we should be showing on the
+   stage.
+
+   Properties:
+   width: Width of the stage in pixels. This is calculated from the
+   actual UI element size.
+   height: Height of the stage in pixels.
+   scale: Scale of the stage compared to the default 1000x500 px size.
+   aimAz: Azimuth the stage is aimed (center points) to.
+   aimAlt: Altitude the stage is aimed (center points) to.
+   zoom: Zoom level in pixels per degree.
+*/
+export const StageContext = createContext();
+
