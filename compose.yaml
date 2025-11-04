@@ -1,0 +1,11 @@
+name: obs-planner
+
+services:
+  server:
+    build: backend
+    ports:
+      - 8080:80
+  astroserver:
+    build: astrobackend
+    ports:
+      - 8081:8000

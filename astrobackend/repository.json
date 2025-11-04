@@ -1,0 +1,16 @@
+{
+    "repository": {
+        "repositoryArn": "arn:aws:ecr:eu-north-1:387938787342:repository/obs-planner-astro-repository",
+        "registryId": "387938787342",
+        "repositoryName": "obs-planner-astro-repository",
+        "repositoryUri": "387938787342.dkr.ecr.eu-north-1.amazonaws.com/obs-planner-astro-repository",
+        "createdAt": "2025-11-04T13:20:48.606000+02:00",
+        "imageTagMutability": "MUTABLE",
+        "imageScanningConfiguration": {
+            "scanOnPush": false
+        },
+        "encryptionConfiguration": {
+            "encryptionType": "AES256"
+        }
+    }
+}

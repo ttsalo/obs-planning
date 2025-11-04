@@ -9,8 +9,9 @@ import (
 )
 
 type Session struct {
-  LAT float64 `json:"lat"`
-  LON float64 `json:"lon"`
+    LAT float64 `json:"lat"`
+    LON float64 `json:"lon"`
+    TARGET string `json:"target"`
 }
 
 /* Decode the session cookie and return the contents to the frontend,
@@ -63,6 +64,7 @@ func updateSession(c echo.Context) error {
     c.Bind(&updated_data)
     cookie_data["lat"] = updated_data.LAT
     cookie_data["lon"] = updated_data.LON
+    cookie_data["target"] = updated_data.TARGET
 
     b, _ = json.Marshal(cookie_data)
     cookie.Value = base64.URLEncoding.EncodeToString(b)

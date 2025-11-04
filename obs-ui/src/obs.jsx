@@ -28,7 +28,7 @@ const ObsStage = () => {
 	    const line = new Konva.Line(
 		{points: [azToPx(i, stageSize), altToPx(-90, stageSize),
 			  azToPx(i, stageSize), altToPx(90, stageSize)],
-		 stroke: "#808080", strokeWidth: 1});
+		 stroke: "#A0A0A0", strokeWidth: 1});
 	    l.add(line);
 	    const label = new Konva.Label({
 		x: azToPx(i, stageSize), 
@@ -55,7 +55,7 @@ const ObsStage = () => {
 	    const line = new Konva.Line(
 		{points: [azToPx(0, stageSize), altToPx(i, stageSize),
 			  azToPx(360, stageSize), altToPx(i, stageSize)],
-		 stroke: "#808080", strokeWidth: 1});
+		 stroke: "#A0A0A0", strokeWidth: 1});
 	    l.add(line);
 	    const label = new Konva.Label({
 		x: azToPx(stageSize.get("minAz"), stageSize),

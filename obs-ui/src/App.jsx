@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Button, Flex, Layout, ConfigProvider, Typography, Input, InputNumber,
-	 Space, Modal, Row, Col } from 'antd';
+	 Space, Modal, Row, Col, Select } from 'antd';
 import { Stage, Layer, Rect, Circle, Text } from 'react-konva';
 import axios from 'axios';
 import ObsStage from './obs.jsx';
@@ -92,13 +92,15 @@ const App = () => {
     const SetDialog = () => {
 	const handleOk = () => {
 	    setIsModalOpen(false);
-	    updateSession(session, setSession, {"lat": lat, "lon": lon});
+	    updateSession(session, setSession, {"lat": lat, "lon": lon,
+						"target": target});
 	};
 	const handleCancel = () => {
 	    setIsModalOpen(false);
 	};
 	const [lat, setLat] = useState(session?.lat);
 	const [lon, setLon] = useState(session?.lon);
+	const [target, setTarget] = useState(session?.target);
 
 	return <ConfigProvider
 		   theme={{token:
@@ -111,23 +113,32 @@ const App = () => {
 		       onOk={handleOk}
 		       onCancel={handleCancel}>
 		       <Row>
-			   <Col className="gutter-row" span={12}>
+			   <Col className="gutter-row" span={8}>
 			       <Typography.Text>Latitude</Typography.Text>
 			   </Col>
-			   <Col className="gutter-row" span={12}>
+			   <Col className="gutter-row" span={8}>
 			       <Typography.Text>Longitude</Typography.Text>
+			   </Col>
+			   <Col className="gutter-row" span={8}>
+			       <Typography.Text>Target(s)</Typography.Text>
 			   </Col>
 		       </Row>
 		       <Row>
-			   <Col className="gutter-row" span={12}>
+			   <Col className="gutter-row" span={8}>
 			       <InputNumber min={-90} max={90} value={lat}
 					    onChange={setLat}>
 			       </InputNumber>
 			   </Col>
-			   <Col className="gutter-row" span={12}>
+			   <Col className="gutter-row" span={8}>
 			       <InputNumber min={-180} max={180} value={lon}
 					    onChange={setLon}>
 			       </InputNumber>
+			   </Col>
+			   <Col className="gutter-row" span={8}>
+			       <Select options={[{ value: 'Moon',
+						   label: <span>Moon</span> }]}
+				       onChange={setTarget}>
+			       </Select>
 			   </Col>
 		       </Row>
 		   </Modal>
@@ -158,6 +169,14 @@ const App = () => {
 				       </Typography.Text>
 				       <Typography.Text>
 					   {session?.lon}
+				       </Typography.Text>
+				   </Space.Compact>
+				   <Space.Compact>
+				       <Typography.Text strong={true}>
+					   Target:
+				       </Typography.Text>
+				       <Typography.Text>
+					   {session?.target}
 				       </Typography.Text>
 				   </Space.Compact>
 				   <Button type="primary"
