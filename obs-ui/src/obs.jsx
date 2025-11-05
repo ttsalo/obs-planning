@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 import Konva from 'konva';
-import { Stage, Layer, Rect, Circle, Text, Line } from 'react-konva';
+import { Stage, Layer, Rect, Circle, Text, Line, Group } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 
 function azToPx(az, stageSize) {
@@ -15,6 +16,7 @@ const ObsStage = () => {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
     const coordsLayer = useRef(null);
+    const objLayer = useRef(null);
     stageSize.forEach((value, key) => {
 	console.log(`${key} = ${value}`);
     });
@@ -78,10 +80,34 @@ const ObsStage = () => {
 	}
     }
     
-    return (
-	<Layer ref={coordsLayer}>
-	</Layer>
-    )
+    if (coordsLayer.current) {
+	const obj_group = new Konva.Group(name="obj_group");
+	coordsLayer.current.add(obj_group);
+	const now = new Date();
+	// Fetch data and draw the objects on the stage
+	const fetchData = async () => {
+	    try {
+		const response = await axios.post(
+		    `//${window.location.hostname}:8081/api/get-obj`,
+		    {target: "moon", lat: session.lat,
+		     lon: session.lon, time: now});
+		const moon = new Konva.Circle({
+		    radius: 25, 
+		    x: azToPx(response.data.az, stageSize),
+		    y: altToPx(response.data.alt, stageSize),
+		    fill: "white",
+		    stroke: "black"});
+		obj_group.add(moon);
+	    } catch (error) {
+		console.error("/get-session fetch failed:", error); 
+	    }
+	};
+	fetchData();
+    }
+    
+    return (<Layer ref={coordsLayer}>
+	    </Layer>
+	   )
 };
 
 export default ObsStage;

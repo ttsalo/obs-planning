@@ -20,9 +20,12 @@ class ObsEcsStack(cdk.Stack):
 
         print(f"Using server repo: {repository}")
 
+        # Create common VPC and cluster
         vpc = ec2.Vpc(self, "ObsVpc", max_azs=2)
         cluster = ecs.Cluster(self, "ObsCluster", vpc=vpc)
 
+        # Create first ALB service as usual, but with an explicit cluster
+        # created above.
         serv1 = ecsp.ApplicationLoadBalancedFargateService(
             self, "ObsServerService",
             task_image_options=ecsp.ApplicationLoadBalancedTaskImageOptions(
@@ -41,6 +44,10 @@ class ObsEcsStack(cdk.Stack):
 
         print(f"Using astro server repo: {repository2}")
 
+        # Create everything required for the second service and attach
+        # it to the load balancer created for the first service, so that
+        # the two services are available in different ports of the same
+        # public IP.
         alb = serv1.load_balancer
         taskdef2 = ecs.FargateTaskDefinition(self, "ObsAstroServerTask")
         container2 = taskdef2.add_container("ObsAstroServerContainer",
@@ -82,6 +89,6 @@ class ObsEcsStack(cdk.Stack):
         )
 
         # Grant the ALB security group access to the Fargate tasks on
-        # the target port
+        # the target port.
         serv2.connections.allow_from(alb, ec2.Port.tcp(8000),
                                      "Allow 8080 traffic from ALB")

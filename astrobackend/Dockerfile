@@ -9,6 +9,8 @@ RUN python3 -m venv .astrovenv
 ADD requirements.txt .
 RUN source .astrovenv/bin/activate
 RUN pip install -r requirements.txt
+ADD fetch_data.py .
+RUN ./fetch_data.py
 ADD . .
 
 EXPOSE 8000
