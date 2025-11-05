@@ -84,7 +84,8 @@ const ObsStage = () => {
 	const obj_group = new Konva.Group(name="obj_group");
 	coordsLayer.current.add(obj_group);
 	const now = new Date();
-	// Fetch data and draw the objects on the stage
+	
+	// Fetch the current position and draw on the stage
 	const fetchData = async () => {
 	    try {
 		const response = await axios.post(
@@ -92,17 +93,39 @@ const ObsStage = () => {
 		    {target: "moon", lat: session.lat,
 		     lon: session.lon, time: now});
 		const moon = new Konva.Circle({
-		    radius: 25, 
+		    radius: response.data.radius * stageSize.get("zoom"), 
 		    x: azToPx(response.data.az, stageSize),
 		    y: altToPx(response.data.alt, stageSize),
 		    fill: "white",
 		    stroke: "black"});
 		obj_group.add(moon);
 	    } catch (error) {
-		console.error("/get-session fetch failed:", error); 
+		console.error("/get-obj fetch failed:", error); 
 	    }
 	};
 	fetchData();
+	
+	const fetchDataSeries = async () => {
+	    try {
+		const response = await axios.post(
+		    `//${window.location.hostname}:8081/api/get-obj`,
+		    {target: "moon", lat: session.lat,
+		     lon: session.lon, time: now, timespan: "day"});
+		const points = [];
+		for (const elem in response.data.series) {
+		    points.push(azToPx(response.data.series[elem].az,
+				       stageSize));
+		    points.push(altToPx(response.data.series[elem].alt,
+					stageSize));
+		};
+		obj_group.add(new Konva.Line({points: points,
+					      stroke: "black",
+					      tension: 1}));
+	    } catch (error) {
+		console.error("/get-obj series fetch failed:", error); 
+	    }
+	};
+	fetchDataSeries();
     }
     
     return (<Layer ref={coordsLayer}>
