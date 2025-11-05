@@ -49,6 +49,12 @@ source .venv/bin/activate
 ```
 `aws sso login` if needed
 
+Also may need to unset
+
+`unset AWS_SECRET_ACCESS_KEY AWS_ACCESS_KEY_ID AWS_SESSION_TOKEN` 
+
+as these will interfere with the sso login, whose details are looked up from whe AWS CLI config using `AWS_PROFILE` env variable. 
+
 # Deployment cycle of the built and pushed image
 ```
 cd obs_ecs
