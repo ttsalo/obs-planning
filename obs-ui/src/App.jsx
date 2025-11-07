@@ -27,8 +27,17 @@ const App = () => {
     const sceneWidth = 1000;
     const sceneHeight = 500;
 
-    // Calculate the alt-az limits of the visible area
+    // Calculate the alt-az limits of the visible area. Set to the full
+    // sky view for now.
     function calcLimits(stageMap) {
+	stageMap.set("minAz", -180);
+	stageMap.set("maxAz", 180);
+	stageMap.set("minAlt", 0);
+	stageMap.set("maxAlt", 90);
+    };
+
+    // Previous implementation, replaced by static limits
+    function _calcLimits(stageMap) {
 	let w = stageMap.get("width");
 	let h = stageMap.get("height");
 	stageMap.set("minAz", stageMap.get("aimAz") -
@@ -48,7 +57,12 @@ const App = () => {
     stageMap.set("scale", 1.0);
     stageMap.set("aimAz", 180.0);
     stageMap.set("aimAlt", 45.0);
+    // zoom is pixels per degree and used when converting the alt-az
+    // coordinates to layer coordinates. The user-visible zooming applied
+    // with the Stage scale prop. (This might still change in some use cases)
     stageMap.set("zoom", 10.0);
+    // Make the moon (and sun) relatively bigger
+    stageMap.set("moonzoom", 5.0);
     calcLimits(stageMap);
     
     const [stageSize, setStageSize] = useState(stageMap)
@@ -60,16 +74,24 @@ const App = () => {
     const updateSize = () => {
 	if (!containerRef.current) return;
 	
-	// Get container width
+	// Get container size
 	const containerWidth = containerRef.current.offsetWidth;
+	const containerHeight = containerRef.current.offsetHeight;
+
+	console.log(`Update size, containerWidth=${containerWidth}`);
+	console.log(`Update size, containerHeight=${containerHeight}`);
+
+	// Layer presentation area width
+	const layerWidth = (stageMap.get("maxAz") - stageMap.get("minAz"))
+	      * stageMap.get("zoom");
 	
-	// Calculate scale
-	const scale = containerWidth / sceneWidth;
-	
+	// Calculate scale to show the full layer on the visible area
+	const scale = containerWidth / layerWidth;
+
 	// Update state with new dimensions
 	stageMap = stageSize;
-	stageMap.set("width", sceneWidth * scale);
-	stageMap.set("height", sceneHeight * scale);
+	stageMap.set("width", containerWidth);
+	stageMap.set("height", containerHeight);
 	stageMap.set("scale", scale);
 	setStageSize(stageMap);
     };
@@ -199,7 +221,8 @@ const App = () => {
 				   width={stageSize.get("width")} 
 				   height={stageSize.get("height")}
 				   scaleX={stageSize.get("scale")}
-				   scaleY={stageSize.get("scale")}>
+				   scaleY={stageSize.get("scale")}
+			           draggable>
 				   <StageContext value={stageSize}>
 				       <ObsStage>
 				       </ObsStage>

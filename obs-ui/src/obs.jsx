@@ -20,16 +20,25 @@ const ObsStage = () => {
     stageSize.forEach((value, key) => {
 	console.log(`${key} = ${value}`);
     });
-    
+
+    /* The component code is evaluated twice when first showing the UI,
+       first with a temporary stage size and without the contained layer
+       having been created, so we'll skip creating any contents at that
+       point. After that there will be a initial resize event in the
+       app and this will be called again for a re-render, at which point
+       we can populate the layer. */
     if (coordsLayer.current) {
 	// Draw the coordinate grid
 	const l = coordsLayer.current;
 	l.destroyChildren();
 	// Azimuth lines (vertical)
-	for (let i = 0; i < 360; i = i + 10) {
+	for (let i = stageSize.get("minAz");
+	     i < stageSize.get("maxAz"); i = i + 10) {
 	    const line = new Konva.Line(
-		{points: [azToPx(i, stageSize), altToPx(-90, stageSize),
-			  azToPx(i, stageSize), altToPx(90, stageSize)],
+		{points: [azToPx(i, stageSize),
+			  altToPx(stageSize.get("minAlt"), stageSize),
+			  azToPx(i, stageSize),
+			  altToPx(stageSize.get("maxAlt"), stageSize)],
 		 stroke: "#A0A0A0", strokeWidth: 1});
 	    l.add(line);
 	    const label = new Konva.Label({
@@ -53,10 +62,14 @@ const ObsStage = () => {
 	}
 	
 	// Altitude lines (horizontal)
-	for (let i = -90; i <= 90; i = i + 10) {
+	for (let i = stageSize.get("minAlt");
+	     i <= stageSize.get("maxAlt"); i = i + 10) {
+
 	    const line = new Konva.Line(
-		{points: [azToPx(0, stageSize), altToPx(i, stageSize),
-			  azToPx(360, stageSize), altToPx(i, stageSize)],
+		{points: [azToPx(stageSize.get("minAz"), stageSize),
+			  altToPx(i, stageSize),
+			  azToPx(stageSize.get("maxAz"), stageSize),
+			  altToPx(i, stageSize)],
 		 stroke: "#A0A0A0", strokeWidth: 1});
 	    l.add(line);
 	    const label = new Konva.Label({
@@ -93,8 +106,9 @@ const ObsStage = () => {
 		    {target: "moon", lat: session.lat,
 		     lon: session.lon, time: now});
 		const moon = new Konva.Circle({
-		    radius: response.data.radius * stageSize.get("zoom"), 
-		    x: azToPx(response.data.az, stageSize),
+		    radius: response.data.radius * stageSize.get("zoom") *
+			stageSize.get("moonzoom"), 
+		    x: azToPx(response.data.az - 180.0, stageSize),
 		    y: altToPx(response.data.alt, stageSize),
 		    fill: "white",
 		    stroke: "black"});
@@ -113,7 +127,7 @@ const ObsStage = () => {
 		     lon: session.lon, time: now, timespan: "day"});
 		const points = [];
 		for (const elem in response.data.series) {
-		    points.push(azToPx(response.data.series[elem].az,
+		    points.push(azToPx(response.data.series[elem].az - 180.0,
 				       stageSize));
 		    points.push(altToPx(response.data.series[elem].alt,
 					stageSize));
