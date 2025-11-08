@@ -30,39 +30,23 @@ const App = () => {
     // Calculate the alt-az limits of the visible area. Set to the full
     // sky view for now.
     function calcLimits(stageMap) {
-	stageMap.set("minAz", -180);
-	stageMap.set("maxAz", 180);
+	stageMap.set("minAz", 0);
+	stageMap.set("maxAz", 360);
 	stageMap.set("minAlt", -90);
 	stageMap.set("maxAlt", 90);
     };
 
-    // Previous implementation, replaced by static limits
-    function _calcLimits(stageMap) {
-	let w = stageMap.get("width");
-	let h = stageMap.get("height");
-	stageMap.set("minAz", stageMap.get("aimAz") -
-		     (w/2 / stageMap.get("zoom")));
-	stageMap.set("maxAz", stageMap.get("aimAz") +
-		     (w/2 / stageMap.get("zoom")));
-	stageMap.set("minAlt", stageMap.get("aimAlt") -
-		     (h/2 / stageMap.get("zoom")));
-	stageMap.set("maxAlt", stageMap.get("aimAlt") +
-		     (h/2 / stageMap.get("zoom")));
-    };
-    
     // State to track current scale and dimensions
     var stageMap = new Map();
     stageMap.set("width", sceneWidth);
     stageMap.set("height", sceneHeight);
     stageMap.set("scale", 1.0);
-    stageMap.set("aimAz", 180.0);
-    stageMap.set("aimAlt", 45.0);
     // zoom is pixels per degree and used when converting the alt-az
     // coordinates to layer coordinates. The user-visible zooming applied
     // with the Stage scale prop. (This might still change in some use cases)
     stageMap.set("zoom", 10.0);
     // Make the moon (and sun) relatively bigger
-    stageMap.set("moonzoom", 5.0);
+    stageMap.set("moonzoom", 10.0);
     calcLimits(stageMap);
     
     const [stageSize, setStageSize] = useState(stageMap)

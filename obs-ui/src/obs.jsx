@@ -40,9 +40,9 @@ const ObsStage = () => {
 			  altToPx(stageSize.get("minAlt"), stageSize),
 			  azToPx(i, stageSize),
 			  altToPx(stageSize.get("maxAlt"), stageSize)],
-		 stroke: ((i == -90 || i == 0 || i == 90) ?
+		 stroke: ((i == 90 || i == 180 || i == 270) ?
 			  "#000000" : "#888888"),
-		 strokeWidth: ((i == -90 || i == 0 || i == 90) ? 1 : 0.5)});
+		 strokeWidth: ((i == 90 || i == 180 || i == 270) ? 1 : 0.5)});
 	    l.add(line);
 	    const label = new Konva.Label({
 		x: azToPx(i, stageSize), 
@@ -112,7 +112,7 @@ const ObsStage = () => {
 		const moon = new Konva.Circle({
 		    radius: response.data.radius * stageSize.get("zoom") *
 			stageSize.get("moonzoom"), 
-		    x: azToPx(response.data.az - 180.0, stageSize),
+		    x: azToPx(response.data.az, stageSize),
 		    y: altToPx(response.data.alt, stageSize),
 		    fill: "white",
 		    stroke: "black"});
@@ -131,7 +131,7 @@ const ObsStage = () => {
 		     lon: session.lon, time: now, timespan: "day"});
 		const points = [];
 		for (const elem in response.data.series) {
-		    points.push(azToPx(response.data.series[elem].az - 180.0,
+		    points.push(azToPx(response.data.series[elem].az,
 				       stageSize));
 		    points.push(altToPx(response.data.series[elem].alt,
 					stageSize));
