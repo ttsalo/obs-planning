@@ -23,7 +23,7 @@ const App = () => {
 	    fetchData();
     });
     
-    // Define virtual size for our scene
+    // Define initial virtual size for our scene
     const sceneWidth = 1000;
     const sceneHeight = 500;
 
@@ -32,7 +32,7 @@ const App = () => {
     function calcLimits(stageMap) {
 	stageMap.set("minAz", -180);
 	stageMap.set("maxAz", 180);
-	stageMap.set("minAlt", 0);
+	stageMap.set("minAlt", -90);
 	stageMap.set("maxAlt", 90);
     };
 
@@ -74,25 +74,24 @@ const App = () => {
     const updateSize = () => {
 	if (!containerRef.current) return;
 	
-	// Get container size
+	// Get container width
 	const containerWidth = containerRef.current.offsetWidth;
-	const containerHeight = containerRef.current.offsetHeight;
 
-	console.log(`Update size, containerWidth=${containerWidth}`);
-	console.log(`Update size, containerHeight=${containerHeight}`);
-
-	// Layer presentation area width
-	const layerWidth = (stageMap.get("maxAz") - stageMap.get("minAz"))
-	      * stageMap.get("zoom");
+	// Layer presentation area width in degrees
+	const layerWidth = stageMap.get("maxAz") - stageMap.get("minAz");
 	
 	// Calculate scale to show the full layer on the visible area
-	const scale = containerWidth / layerWidth;
-
+	//const scale = containerWidth / layerWidth;
+	const scale = containerWidth / sceneWidth;
+	
 	// Update state with new dimensions
 	stageMap = stageSize;
-	stageMap.set("width", containerWidth);
-	stageMap.set("height", containerHeight);
+	stageMap.set("width", sceneWidth * scale);
+	stageMap.set("height", sceneHeight * scale);
 	stageMap.set("scale", scale);
+	// Set the zoom level (pixels per degree) so that the presentation
+	// area fits on the screen exactly.
+	stageMap.set("zoom", sceneWidth / layerWidth);
 	setStageSize(stageMap);
     };
   
