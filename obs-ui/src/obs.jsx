@@ -31,22 +31,25 @@ const ObsStage = () => {
 	// Draw the coordinate grid
 	const l = coordsLayer.current;
 	l.destroyChildren();
+	const step = 30; // Adjust based on zoom level when implemented
 	// Azimuth lines (vertical)
-	for (let i = stageSize.get("minAz");
-	     i < stageSize.get("maxAz"); i = i + 10) {
-	    const line = new Konva.Line(
+	for (let i = stageSize.get("minAz") + step;
+	     i < stageSize.get("maxAz"); i = i + step) {
+		const line = new Konva.Line(
 		{points: [azToPx(i, stageSize),
 			  altToPx(stageSize.get("minAlt"), stageSize),
 			  azToPx(i, stageSize),
 			  altToPx(stageSize.get("maxAlt"), stageSize)],
-		 stroke: "#A0A0A0", strokeWidth: 1});
+		 stroke: ((i == -90 || i == 0 || i == 90) ?
+			  "#000000" : "#888888"),
+		 strokeWidth: ((i == -90 || i == 0 || i == 90) ? 1 : 0.5)});
 	    l.add(line);
 	    const label = new Konva.Label({
 		x: azToPx(i, stageSize), 
 		y: altToPx(stageSize.get("maxAlt"), stageSize)});
 	    label.add(
 		new Konva.Tag({
-		    pointerDirection: 'left',
+		    pointerDirection: 'down',
 		    pointerWidth: 6,
 		    pointerHeight: 6,
 		    lineJoin: 'round',
@@ -57,27 +60,28 @@ const ObsStage = () => {
 	    );
 	    label.add(new Konva.Text({text: `${i}°`, padding: 2,
 				       fill: "black"}));
-	    label.setAttrs({y: label.getAttr('y') + label.height()});
+	    label.setAttrs({y: label.getAttr('y') + label.height() * 2});
 	    l.add(label);
 	}
 	
 	// Altitude lines (horizontal)
-	for (let i = stageSize.get("minAlt");
-	     i <= stageSize.get("maxAlt"); i = i + 10) {
+	for (let i = stageSize.get("minAlt") + step;
+	     i < stageSize.get("maxAlt"); i = i + step) {
 
 	    const line = new Konva.Line(
 		{points: [azToPx(stageSize.get("minAz"), stageSize),
 			  altToPx(i, stageSize),
 			  azToPx(stageSize.get("maxAz"), stageSize),
 			  altToPx(i, stageSize)],
-		 stroke: "#A0A0A0", strokeWidth: 1});
+		 stroke: ((i == 0) ? "#000000" : "#888888"),
+		 strokeWidth: ((i == 0) ? 1 : 0.5)});
 	    l.add(line);
 	    const label = new Konva.Label({
 		x: azToPx(stageSize.get("minAz"), stageSize),
 		y: altToPx(i, stageSize)});
 	    label.add(
 		new Konva.Tag({
-		    pointerDirection: 'up',
+		    pointerDirection: 'right',
 		    pointerWidth: 6,
 		    pointerHeight: 6,
 		    lineJoin: 'round',
@@ -88,7 +92,7 @@ const ObsStage = () => {
 	    );
 	    label.add(new Konva.Text({text: `${i}°`, padding: 2,
 				       fill: "black"}));
-	    label.setAttrs({x: label.getAttr('x') + label.width()});
+	    label.setAttrs({x: label.getAttr('x') + label.width() * 2});
 	    l.add(label);
 	}
     }
