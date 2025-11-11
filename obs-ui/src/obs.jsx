@@ -4,13 +4,6 @@ import Konva from 'konva';
 import { Stage, Layer, Rect, Circle, Text, Line, Group } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 
-function azToPx(az, stageSize) {
-    return (az - stageSize.get("minAz")) * stageSize.get("zoom");
-}
-
-function altToPx(alt, stageSize) {
-    return (stageSize.get("maxAlt") - alt) * stageSize.get("zoom");
-}
 
 const ObsStage = () => {
     const session = useContext(SessionContext);
@@ -20,6 +13,8 @@ const ObsStage = () => {
     stageSize.forEach((value, key) => {
 	console.log(`${key} = ${value}`);
     });
+    const azToPx = stageSize.get("azToPx");
+    const altToPx = stageSize.get("altToPx");
 
     /* The component code is evaluated twice when first showing the UI,
        first with a temporary stage size and without the contained layer

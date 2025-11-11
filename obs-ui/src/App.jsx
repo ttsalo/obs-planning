@@ -76,6 +76,10 @@ const App = () => {
 	// Set the zoom level (pixels per degree) so that the presentation
 	// area fits on the screen exactly.
 	stageMap.set("zoom", sceneWidth / layerWidth);
+	stageMap.set("azToPx", (az) => { return (az - stageMap.get("minAz")) *
+					 stageMap.get("zoom") });
+	stageMap.set("altToPx", (alt) => {
+	    return (stageMap.get("maxAlt") - alt) * stageSize.get("zoom")});
 	setStageSize(stageMap);
     };
   
