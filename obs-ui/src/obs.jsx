@@ -5,6 +5,41 @@ import { Stage, Layer, Rect, Circle, Text, Line, Group } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 
 
+function Target({target}) {
+    const session = useContext(SessionContext);
+    const stageSize = useContext(StageContext);
+    const [remoteProps, setRemoteProps] = useState({});
+
+    // Function to fetch the current position and update the component state
+    const fetchData = async () => {
+	try {
+	    const now = new Date();
+	    const response = await axios.post(
+		`//${window.location.hostname}:8081/api/get-obj`,
+		{target: target, lat: session.lat,
+		 lon: session.lon, time: now});
+	    setRemoteProps({x: stageSize.get("azToPx")(response.data.az),
+			    y: stageSize.get("altToPx")(response.data.alt),
+			    radius: response.data.radius * stageSize.get("zoom")
+			    * stageSize.get("moonzoom")});
+	} catch (error) {
+	    console.error("/get-obj fetch failed:", error); 
+	}
+    };
+    
+    if (!target) { return null };
+
+    if (!remoteProps.x) {
+	fetchData();
+	return null;
+    };
+
+    return (<Circle fill="white" stroke="black" x={remoteProps.x}
+		    y={remoteProps.y} radius={remoteProps.radius}>
+	    </Circle>)
+};
+
+
 const ObsStage = () => {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
@@ -97,27 +132,6 @@ const ObsStage = () => {
 	coordsLayer.current.add(obj_group);
 	const now = new Date();
 	
-	// Fetch the current position and draw on the stage
-	const fetchData = async () => {
-	    try {
-		const response = await axios.post(
-		    `//${window.location.hostname}:8081/api/get-obj`,
-		    {target: "moon", lat: session.lat,
-		     lon: session.lon, time: now});
-		const moon = new Konva.Circle({
-		    radius: response.data.radius * stageSize.get("zoom") *
-			stageSize.get("moonzoom"), 
-		    x: azToPx(response.data.az, stageSize),
-		    y: altToPx(response.data.alt, stageSize),
-		    fill: "white",
-		    stroke: "black"});
-		obj_group.add(moon);
-	    } catch (error) {
-		console.error("/get-obj fetch failed:", error); 
-	    }
-	};
-	fetchData();
-	
 	const fetchDataSeries = async () => {
 	    try {
 		const response = await axios.post(
@@ -142,6 +156,8 @@ const ObsStage = () => {
     }
     
     return (<Layer ref={coordsLayer}>
+		<Target target={session?.target}>
+		</Target>
 	    </Layer>
 	   )
 };
