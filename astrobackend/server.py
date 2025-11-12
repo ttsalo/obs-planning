@@ -42,8 +42,10 @@ def get_obj():
         with solar_system_ephemeris.set('de432s'):
             obj = get_body(data["target"], t, loc)
         aa = obj.transform_to(AltAz(obstime=t, location=loc))
-        # Fixed just for moon for now
-        radius = math.atan(1737.4 / obj.distance.km) * 180 / math.pi
+        # Is there a more definitive catalog for this?
+        radius = math.atan(
+            {"moon": 1737.4, "sun": 696340}[data["target"].lower()]
+            / obj.distance.km) * 180 / math.pi
         resp = make_response({"alt": aa.alt.deg, "az": aa.az.deg,
                               "radius": radius})
 

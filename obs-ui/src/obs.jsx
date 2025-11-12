@@ -5,7 +5,7 @@ import { Stage, Layer, Rect, Circle, Text, Line, Group } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 
 
-function Target({target}) {
+function Target({target, fill="white"}) {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
     const [remoteProps, setRemoteProps] = useState({});
@@ -13,6 +13,7 @@ function Target({target}) {
     // Function to fetch the current position and update the component state
     const fetchData = async () => {
 	try {
+	    if (session == null) { return null };
 	    const now = new Date();
 	    const response = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj`,
@@ -22,6 +23,8 @@ function Target({target}) {
 			    y: stageSize.get("altToPx")(response.data.alt),
 			    radius: response.data.radius * stageSize.get("zoom")
 			    * stageSize.get("moonzoom")});
+	    // Set up a once per minute timeout to update the position.
+	    setTimeout(fetchData, 60*1000);
 	} catch (error) {
 	    console.error("/get-obj fetch failed:", error); 
 	}
@@ -34,7 +37,7 @@ function Target({target}) {
 	return null;
     };
 
-    return (<Circle fill="white" stroke="black" x={remoteProps.x}
+    return (<Circle fill={fill} stroke="black" x={remoteProps.x}
 		    y={remoteProps.y} radius={remoteProps.radius}>
 	    </Circle>)
 };
@@ -139,11 +142,13 @@ const ObsStage = () => {
 		    {target: "moon", lat: session.lat,
 		     lon: session.lon, time: now, timespan: "day"});
 		const points = [];
+		let x = 0;
+		let y = 0;
 		for (const elem in response.data.series) {
-		    points.push(azToPx(response.data.series[elem].az,
-				       stageSize));
-		    points.push(altToPx(response.data.series[elem].alt,
-					stageSize));
+		    x = stageSize.get("azToPx")(response.data.series[elem].az);
+		    y = stageSize.get("altToPx")(response.data.series[elem].alt);
+		    points.push(x);
+		    points.push(y);
 		};
 		obj_group.add(new Konva.Line({points: points,
 					      stroke: "black",
@@ -157,6 +162,8 @@ const ObsStage = () => {
     
     return (<Layer ref={coordsLayer}>
 		<Target target={session?.target}>
+		</Target>
+		<Target target="sun" fill="yellow">
 		</Target>
 	    </Layer>
 	   )
