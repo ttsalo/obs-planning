@@ -75,8 +75,15 @@ function TargetPath({target}) {
 	return null;
     };
 
-    return (<Line points={remoteProps.points} stroke="black" tension={1}>
-	    </Line>);
+    return (<Group>
+		<Line points={remoteProps.points} strokeWidth={5} 
+		      stroke="black" tension={1}
+		      shadowColor="black" shadowBlur={10}>
+		</Line>
+		<Line points={remoteProps.points} strokeWidth={2} 
+		      stroke={target == "sun" ? "yellow" : "white"} tension={1}>
+		</Line>
+	    </Group>);
 };
 
 // Coordinate grid component
@@ -91,35 +98,37 @@ function CoordGrid() {
     let altGrid = [];
     // Adjust step based on zoom level when implemented. Also used to fudge
     // the label positions which would otherwise be off the visible area.
-    const step = 30; 
+    const step = 30;
+
+    const minAzPx = azToPx(stageSize.get("minAz"));
+    const maxAzPx = azToPx(stageSize.get("maxAz"));
+    const minAltPx = altToPx(stageSize.get("minAlt"));
+    const maxAltPx = altToPx(stageSize.get("maxAlt"));
+    const horizonAltPx = altToPx(0);
     
     for (let i = stageSize.get("minAz") + step;
 	 i < stageSize.get("maxAz"); i = i + step) {
 	azGrid.push({az: i, major: (i == 90 || i == 180 || i == 270),
 		     azPx: azToPx(i),
-		     minAltPx: altToPx(stageSize.get("minAlt")),
-		     maxAltPx: altToPx(stageSize.get("maxAlt")),
 		     labelAltPx: altToPx(stageSize.get("maxAlt") - step/3)});
     };
     
     for (let i = stageSize.get("minAlt") + step;
 	 i < stageSize.get("maxAlt"); i = i + step) {
 	altGrid.push({alt: i, major: (i == 0), altPx: altToPx(i),
-		      minAzPx: azToPx(stageSize.get("minAz")),
-		      maxAzPx: azToPx(stageSize.get("maxAz")),
 		      labelAzPx: azToPx(stageSize.get("minAz") + step/2)});
     };
 
     const azLines = azGrid.map(azLine =>
-	<Line points={[azLine.azPx, azLine.minAltPx,
-		       azLine.azPx, azLine.maxAltPx]}
+	<Line points={[azLine.azPx, minAltPx,
+		       azLine.azPx, maxAltPx]}
 	      stroke={azLine.major ? "#000000" : "#888888"}
 	      strokeWidth={azLine.major ? 1 : 0.5}>
 	</Line>);
 
     const altLines = altGrid.map(altLine =>
-	<Line points={[altLine.minAzPx, altLine.altPx,
-		       altLine.maxAzPx, altLine.altPx]}
+	<Line points={[minAzPx, altLine.altPx,
+		       maxAzPx, altLine.altPx]}
 	      stroke={altLine.major ? "#000000" : "#888888"}
 	      strokeWidth={altLine.major ? 1 : 0.5}>
 	</Line>);
@@ -152,7 +161,18 @@ function CoordGrid() {
 	    </Text>
 	</Label>);
 
-    return (<Group>{azLines}{altLines}{azLabels}{altLabels}</Group>);
+    // Sky and ground backgrounds with coordinate lines and labels on top
+    return (<Group>
+		<Rect x={minAzPx} y={maxAltPx} width={maxAzPx-minAzPx}
+		      height={horizonAltPx-maxAltPx}
+		      strokeEnabled={false} fill="#87CEEB">
+		</Rect>
+		<Rect x={minAzPx} y={horizonAltPx} width={maxAzPx-minAzPx}
+		      height={minAltPx-horizonAltPx}
+		      strokeEnabled={false} fill="#D69847">
+		</Rect>
+		{azLines}{altLines}{azLabels}{altLabels}
+	    </Group>);
 };
 
 const ObsStage = () => {
@@ -171,14 +191,14 @@ const ObsStage = () => {
     return (<Layer>
 		<CoordGrid>
 		</CoordGrid>
-		<Target target={session.target}>
-		</Target>
 		<TargetPath target={session.target}>
 		</TargetPath>
-		<Target target="sun" fill="yellow">
-		</Target>
 		<TargetPath target="sun">
 		</TargetPath>
+		<Target target={session.target}>
+		</Target>
+		<Target target="sun" fill="yellow">
+		</Target>
 	    </Layer>
 	   )
 };
