@@ -47,6 +47,8 @@ const App = () => {
     stageMap.set("zoom", 10.0);
     // Make the moon (and sun) relatively bigger
     stageMap.set("moonzoom", 10.0);
+    // Make the planets relatively bigger
+    stageMap.set("planetzoom", 200.0);
     calcLimits(stageMap);
     
     const [stageSize, setStageSize] = useState(stageMap)
@@ -144,8 +146,11 @@ const App = () => {
 			       </InputNumber>
 			   </Col>
 			   <Col className="gutter-row" span={8}>
-			       <Select options={[{ value: 'Moon',
-						   label: <span>Moon</span> }]}
+			       <Select options={[
+					   { value: 'moon',
+					     label: <span>Moon</span> },
+					   { value: 'jupiter',
+					     label: <span>Jupiter</span> }]}
 				       onChange={setTarget}>
 			       </Select>
 			   </Col>

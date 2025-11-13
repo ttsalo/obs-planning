@@ -52,7 +52,15 @@ def get_obj():
             obj = get_body(data["target"], t, loc)
         aa = obj.transform_to(AltAz(obstime=t, location=loc))
         radius = math.atan(
-            {"moon": 1737.4, "sun": 696340}[data["target"].lower()]
+            {"mercury": 2439.7,
+             "venus": 6051.8,
+             "moon": 1737.4,
+             "mars": 3389.5,
+             "jupiter": 69911.0,
+             "saturn": 58232.0,
+             "uranus": 25362.0,
+             "neptunus": 24622.0,
+             "sun": 696340.0}[data["target"].lower()]
             / obj.distance.km) * 180 / math.pi
         resp = make_response({"alt": aa.alt.deg, "az": aa.az.deg,
                               "radius": radius})

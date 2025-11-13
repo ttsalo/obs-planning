@@ -23,7 +23,9 @@ function Target({target, fill="white"}) {
 	    setRemoteProps({x: stageSize.get("azToPx")(response.data.az),
 			    y: stageSize.get("altToPx")(response.data.alt),
 			    radius: response.data.radius * stageSize.get("zoom")
-			    * stageSize.get("moonzoom")});
+			    * (target == "sun" || target == "moon" ?
+			       stageSize.get("moonzoom") :
+			       stageSize.get("planetzoom"))});
 	    // Set up a once per minute timeout to update the position.
 	    setTimeout(fetchData, 60*1000);
 	} catch (error) {
