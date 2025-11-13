@@ -49,7 +49,7 @@ function TargetPath({target}) {
     const [remoteProps, setRemoteProps] = useState(null);
 
     function altToBrightness(elem) {
-	const alt = elem.alt;
+	const alt = (target == "sun" ? elem.alt : elem.sun_alt);
 	if (alt >= 0) return 4;
 	if (alt >= -6) return 3;
 	if (alt >= -12) return 2;

@@ -35,14 +35,22 @@ def get_obj():
         with solar_system_ephemeris.set('de432s'):
             aas = [get_body(data["target"], t["time"], loc).transform_to(
                 AltAz(obstime=t["time"], location=loc)) for t in ts]
-        resp = make_response({"series": [{"alt": aa.alt.deg, "az": aa.az.deg}
-                                         for aa in aas]})
+            if not data["target"] == "sun":
+                sun_aas = [get_body("sun", t["time"], loc).transform_to(
+                    AltAz(obstime=t["time"], location=loc)) for t in ts]
+                resp = make_response(
+                    {"series": [{"alt": i[0].alt.deg, "az": i[0].az.deg,
+                                 "sun_alt": i[1].alt.deg}
+                                for i in zip(aas, sun_aas)]})
+            else:
+                resp = make_response({"series": [{"alt": aa.alt.deg,
+                                                  "az": aa.az.deg}
+                                                 for aa in aas]})
     else:
         t = Time(data["time"])
         with solar_system_ephemeris.set('de432s'):
             obj = get_body(data["target"], t, loc)
         aa = obj.transform_to(AltAz(obstime=t, location=loc))
-        # Is there a more definitive catalog for this?
         radius = math.atan(
             {"moon": 1737.4, "sun": 696340}[data["target"].lower()]
             / obj.distance.km) * 180 / math.pi
