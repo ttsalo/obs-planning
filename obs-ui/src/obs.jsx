@@ -13,7 +13,6 @@ function Target({target, fill="white"}) {
     // Function to fetch the current position and update the component state
     const fetchData = async () => {
 	try {
-	    if (session == null) { return null };
 	    const now = new Date();
 	    const response = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj`,
@@ -30,9 +29,7 @@ function Target({target, fill="white"}) {
 	}
     };
     
-    if (!target) { return null };
-
-    if (!remoteProps.x) {
+    if (!remoteProps.radius) {
 	fetchData();
 	return null;
     };
@@ -51,6 +48,10 @@ const ObsStage = () => {
     stageSize.forEach((value, key) => {
 	console.log(`${key} = ${value}`);
     });
+    if (session == null) {
+	console.log("session null, skip rendering contents");
+	return null;
+    }
     const azToPx = stageSize.get("azToPx");
     const altToPx = stageSize.get("altToPx");
 
