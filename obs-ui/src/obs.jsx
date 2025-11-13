@@ -78,6 +78,47 @@ function TargetPath({target}) {
 	    </Line>);
 };
 
+// Coordinate grid component
+function CoordGrid() {
+    const session = useContext(SessionContext);
+    const stageSize = useContext(StageContext);
+
+    const azToPx = stageSize.get("azToPx");
+    const altToPx = stageSize.get("altToPx");
+
+    let azGrid = [];
+    let altGrid = [];
+    const step = 30; // Adjust based on zoom level when implemented
+    
+    for (let i = stageSize.get("minAz") + step;
+	 i < stageSize.get("maxAz"); i = i + step) {
+	azGrid.push({az: i, major: (i == 90 || i == 180 || i == 270),
+		     azPx: azToPx(i),
+		     minAltPx: altToPx(stageSize.get("minAlt")),
+		     maxAltPx: altToPx(stageSize.get("maxAlt"))});
+    };
+    for (let i = stageSize.get("minAlt") + step;
+	 i < stageSize.get("maxAlt"); i = i + step) {
+	altGrid.push({alt: i, major: (i == 0), altPx: altToPx(i),
+		      minAzPx: azToPx(stageSize.get("minAz")),
+		      maxAzPx: azToPx(stageSize.get("maxAz"))});
+    };
+    const azLines = azGrid.map(azLine =>
+	<Line points={[azLine.azPx, azLine.minAltPx,
+		       azLine.azPx, azLine.maxAltPx]}
+	      stroke={azLine.major ? "#000000" : "#888888"}
+	      strokeWidth={azLine.major ? 1 : 0.5}>
+	</Line>);
+    const altLines = altGrid.map(altLine =>
+	<Line points={[altLine.minAzPx, altLine.altPx,
+		       altLine.maxAzPx, altLine.altPx]}
+	      stroke={altLine.major ? "#000000" : "#888888"}
+	      strokeWidth={altLine.major ? 1 : 0.5}>
+	</Line>);
+
+    return (<Group>{azLines}{altLines}</Group>);
+};
+
 const ObsStage = () => {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
@@ -170,6 +211,8 @@ const ObsStage = () => {
     }
        
     return (<Layer ref={coordsLayer}>
+		<CoordGrid>
+		</CoordGrid>
 		<Target target={session.target}>
 		</Target>
 		<TargetPath target={session.target}>
