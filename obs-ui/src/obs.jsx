@@ -4,11 +4,12 @@ import Konva from 'konva';
 import { Stage, Layer, Rect, Circle, Text, Line, Group } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 
-
+// Component to plot the current position of the given target in the sky,
+// seen from the geographic location in the settings.
 function Target({target, fill="white"}) {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
-    const [remoteProps, setRemoteProps] = useState({});
+    const [remoteProps, setRemoteProps] = useState(null);
 
     // Function to fetch the current position and update the component state
     const fetchData = async () => {
@@ -29,7 +30,7 @@ function Target({target, fill="white"}) {
 	}
     };
     
-    if (!remoteProps.radius) {
+    if (remoteProps == null) {
 	fetchData();
 	return null;
     };
@@ -39,6 +40,43 @@ function Target({target, fill="white"}) {
 	    </Circle>)
 };
 
+// Component to plot the future path of a given target in the sky,
+// seen from the geographic location in the settings.
+function TargetPath({target}) {
+    const session = useContext(SessionContext);
+    const stageSize = useContext(StageContext);
+    const [remoteProps, setRemoteProps] = useState(null);
+
+    const fetchDataSeries = async () => {
+	try {
+	    const now = new Date();
+	    const response = await axios.post(
+		`//${window.location.hostname}:8081/api/get-obj`,
+		{target: target, lat: session.lat,
+		 lon: session.lon, time: now, timespan: "day"});
+	    const points = [];
+	    let x = 0;
+	    let y = 0;
+	    for (const elem in response.data.series) {
+		x = stageSize.get("azToPx")(response.data.series[elem].az);
+		y = stageSize.get("altToPx")(response.data.series[elem].alt);
+		points.push(x);
+		points.push(y);
+	    };
+	    setRemoteProps({points: points});
+	} catch (error) {
+	    console.error("/get-obj series fetch failed:", error); 
+	}
+    };
+
+    if (remoteProps == null) {
+	fetchDataSeries();
+	return null;
+    };
+
+    return (<Line points={remoteProps.points} stroke="black" tension={1}>
+	    </Line>);
+};
 
 const ObsStage = () => {
     const session = useContext(SessionContext);
@@ -130,42 +168,16 @@ const ObsStage = () => {
 	    l.add(label);
 	}
     }
-    
-    if (coordsLayer.current) {
-	const obj_group = new Konva.Group(name="obj_group");
-	coordsLayer.current.add(obj_group);
-	const now = new Date();
-	
-	const fetchDataSeries = async () => {
-	    try {
-		const response = await axios.post(
-		    `//${window.location.hostname}:8081/api/get-obj`,
-		    {target: "moon", lat: session.lat,
-		     lon: session.lon, time: now, timespan: "day"});
-		const points = [];
-		let x = 0;
-		let y = 0;
-		for (const elem in response.data.series) {
-		    x = stageSize.get("azToPx")(response.data.series[elem].az);
-		    y = stageSize.get("altToPx")(response.data.series[elem].alt);
-		    points.push(x);
-		    points.push(y);
-		};
-		obj_group.add(new Konva.Line({points: points,
-					      stroke: "black",
-					      tension: 1}));
-	    } catch (error) {
-		console.error("/get-obj series fetch failed:", error); 
-	    }
-	};
-	fetchDataSeries();
-    }
-    
+       
     return (<Layer ref={coordsLayer}>
-		<Target target={session?.target}>
+		<Target target={session.target}>
 		</Target>
+		<TargetPath target={session.target}>
+		</TargetPath>
 		<Target target="sun" fill="yellow">
 		</Target>
+		<TargetPath target="sun">
+		</TargetPath>
 	    </Layer>
 	   )
 };
