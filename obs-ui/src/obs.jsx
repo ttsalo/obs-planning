@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import Konva from 'konva';
-import { Stage, Layer, Rect, Circle, Text, Line, Group } from 'react-konva';
+import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
+	 Tag } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 
 // Component to plot the current position of the given target in the sky,
@@ -88,129 +89,86 @@ function CoordGrid() {
 
     let azGrid = [];
     let altGrid = [];
-    const step = 30; // Adjust based on zoom level when implemented
+    // Adjust step based on zoom level when implemented. Also used to fudge
+    // the label positions which would otherwise be off the visible area.
+    const step = 30; 
     
     for (let i = stageSize.get("minAz") + step;
 	 i < stageSize.get("maxAz"); i = i + step) {
 	azGrid.push({az: i, major: (i == 90 || i == 180 || i == 270),
 		     azPx: azToPx(i),
 		     minAltPx: altToPx(stageSize.get("minAlt")),
-		     maxAltPx: altToPx(stageSize.get("maxAlt"))});
+		     maxAltPx: altToPx(stageSize.get("maxAlt")),
+		     labelAltPx: altToPx(stageSize.get("maxAlt") - step/3)});
     };
+    
     for (let i = stageSize.get("minAlt") + step;
 	 i < stageSize.get("maxAlt"); i = i + step) {
 	altGrid.push({alt: i, major: (i == 0), altPx: altToPx(i),
 		      minAzPx: azToPx(stageSize.get("minAz")),
-		      maxAzPx: azToPx(stageSize.get("maxAz"))});
+		      maxAzPx: azToPx(stageSize.get("maxAz")),
+		      labelAzPx: azToPx(stageSize.get("minAz") + step/2)});
     };
+
     const azLines = azGrid.map(azLine =>
 	<Line points={[azLine.azPx, azLine.minAltPx,
 		       azLine.azPx, azLine.maxAltPx]}
 	      stroke={azLine.major ? "#000000" : "#888888"}
 	      strokeWidth={azLine.major ? 1 : 0.5}>
 	</Line>);
+
     const altLines = altGrid.map(altLine =>
 	<Line points={[altLine.minAzPx, altLine.altPx,
 		       altLine.maxAzPx, altLine.altPx]}
 	      stroke={altLine.major ? "#000000" : "#888888"}
 	      strokeWidth={altLine.major ? 1 : 0.5}>
 	</Line>);
+    
+    const azLabels = azGrid.map(azLine =>
+	<Label x={azLine.azPx} y={azLine.labelAltPx}>
+	    <Tag pointerDirection='down'
+		 pointerWidth={6}
+		 pointerHeight={6}
+		 lineJoin='round'
+		 fill='white'
+		 stroke='#808080'
+		 strokeWidth={1}>
+	    </Tag>
+	    <Text text={`${azLine.az}°`} padding={2} fill='black'>
+	    </Text>
+	</Label>);
 
-    return (<Group>{azLines}{altLines}</Group>);
+    const altLabels = altGrid.map(altLine =>
+	<Label x={altLine.labelAzPx} y={altLine.altPx}>
+	    <Tag pointerDirection='right'
+		 pointerWidth={6}
+		 pointerHeight={6}
+		 lineJoin='round'
+		 fill='white'
+		 stroke='#808080'
+		 strokeWidth={1}>
+	    </Tag>
+	    <Text text={`${altLine.alt}°`} padding={2} fill='black'>
+	    </Text>
+	</Label>);
+
+    return (<Group>{azLines}{altLines}{azLabels}{altLabels}</Group>);
 };
 
 const ObsStage = () => {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
-    const coordsLayer = useRef(null);
-    const objLayer = useRef(null);
+    
     stageSize.forEach((value, key) => {
 	console.log(`${key} = ${value}`);
     });
+    
     if (session == null) {
 	console.log("session null, skip rendering contents");
 	return null;
     }
-    const azToPx = stageSize.get("azToPx");
-    const altToPx = stageSize.get("altToPx");
-
-    /* The component code is evaluated twice when first showing the UI,
-       first with a temporary stage size and without the contained layer
-       having been created, so we'll skip creating any contents at that
-       point. After that there will be a initial resize event in the
-       app and this will be called again for a re-render, at which point
-       we can populate the layer. */
-    if (coordsLayer.current) {
-	// Draw the coordinate grid
-	const l = coordsLayer.current;
-	l.destroyChildren();
-	const step = 30; // Adjust based on zoom level when implemented
-	// Azimuth lines (vertical)
-	for (let i = stageSize.get("minAz") + step;
-	     i < stageSize.get("maxAz"); i = i + step) {
-		const line = new Konva.Line(
-		{points: [azToPx(i, stageSize),
-			  altToPx(stageSize.get("minAlt"), stageSize),
-			  azToPx(i, stageSize),
-			  altToPx(stageSize.get("maxAlt"), stageSize)],
-		 stroke: ((i == 90 || i == 180 || i == 270) ?
-			  "#000000" : "#888888"),
-		 strokeWidth: ((i == 90 || i == 180 || i == 270) ? 1 : 0.5)});
-	    l.add(line);
-	    const label = new Konva.Label({
-		x: azToPx(i, stageSize), 
-		y: altToPx(stageSize.get("maxAlt"), stageSize)});
-	    label.add(
-		new Konva.Tag({
-		    pointerDirection: 'down',
-		    pointerWidth: 6,
-		    pointerHeight: 6,
-		    lineJoin: 'round',
-		    fill: 'white',
-		    stroke: "#808080",
-		    strokeWidth: 1
-		})
-	    );
-	    label.add(new Konva.Text({text: `${i}°`, padding: 2,
-				       fill: "black"}));
-	    label.setAttrs({y: label.getAttr('y') + label.height() * 2});
-	    l.add(label);
-	}
-	
-	// Altitude lines (horizontal)
-	for (let i = stageSize.get("minAlt") + step;
-	     i < stageSize.get("maxAlt"); i = i + step) {
-
-	    const line = new Konva.Line(
-		{points: [azToPx(stageSize.get("minAz"), stageSize),
-			  altToPx(i, stageSize),
-			  azToPx(stageSize.get("maxAz"), stageSize),
-			  altToPx(i, stageSize)],
-		 stroke: ((i == 0) ? "#000000" : "#888888"),
-		 strokeWidth: ((i == 0) ? 1 : 0.5)});
-	    l.add(line);
-	    const label = new Konva.Label({
-		x: azToPx(stageSize.get("minAz"), stageSize),
-		y: altToPx(i, stageSize)});
-	    label.add(
-		new Konva.Tag({
-		    pointerDirection: 'right',
-		    pointerWidth: 6,
-		    pointerHeight: 6,
-		    lineJoin: 'round',
-		    fill: 'white',
-		    stroke: "#808080",
-		    strokeWidth: 1
-		})
-	    );
-	    label.add(new Konva.Text({text: `${i}°`, padding: 2,
-				       fill: "black"}));
-	    label.setAttrs({x: label.getAttr('x') + label.width() * 2});
-	    l.add(label);
-	}
-    }
        
-    return (<Layer ref={coordsLayer}>
+    return (<Layer>
 		<CoordGrid>
 		</CoordGrid>
 		<Target target={session.target}>
