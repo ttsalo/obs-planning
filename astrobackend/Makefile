@@ -29,5 +29,5 @@ update-reqs:
 	(source .astrovenv/bin/activate; pip-compile)
 
 check:
-	(source .astrovenv/bin/activate; pytest)
+	(source .astrovenv/bin/activate; PYTHONPATH=. pytest)
 
