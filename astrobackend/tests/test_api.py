@@ -50,5 +50,6 @@ def test_get_obj_timeseries(client, obj):
     assert response.status_code == 200
     assert isinstance(response.json["series"][0]["az"], float)
     assert isinstance(response.json["series"][0]["alt"], float)
+    assert isinstance(response.json["series"][0]["sun_alt"], float)
+    assert "2025-12-10T22:42:33.015" in response.json["series"][0]["ts"]
 
-    

@@ -45,11 +45,14 @@ def get_obj():
                     AltAz(obstime=t["time"], location=loc)) for t in ts]
                 resp = make_response(
                     {"series": [{"alt": i[0].alt.deg, "az": i[0].az.deg,
-                                 "sun_alt": i[1].alt.deg, "ts": i[0].obstime}
+                                 "sun_alt": i[1].alt.deg,
+                                 "ts": i[0].obstime.value}
                                 for i in zip(aas, sun_aas)]})
             else:
                 resp = make_response({"series": [{"alt": aa.alt.deg,
-                                                  "az": aa.az.deg}
+                                                  "sun_alt": aa.alt.deg,
+                                                  "az": aa.az.deg,
+                                                  "ts": aa.obstime.value}
                                                  for aa in aas]})
     else:
         t = Time(data["time"])
