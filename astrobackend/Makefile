@@ -25,4 +25,9 @@ createrepository:
 deleterepository:
 	aws ecr delete-repository --repository-name $(AWS_ASTRO_REPOSITORY) --region $(AWS_REGION) --force
 
+update-reqs:
+	(source .astrovenv/bin/activate; pip-compile)
+
+check:
+	(source .astrovenv/bin/activate; pytest)
 
