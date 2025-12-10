@@ -72,8 +72,11 @@ function TargetPath({target}) {
     // The line segment is crossing a brightness transition, interpolate
     // the exact point where that happens
     function interpolateTransition(x1, y1, x2, y2, b1, b2) {
-	
-
+	const alt = brightnessChangeToAlt(b1, b2);
+	const altPx = stageSize.get("altToPx")(alt);
+	const d = (y1 - altPx) / (y1 - y2);
+	console.log(`${target} crossed ${alt} with ratio ${d}`);
+	return [x1 + ((x2 - x1) * d), y1 + ((y2 - y1) * d)];
     };
 
     const fetchDataSeries = async () => {
@@ -83,25 +86,39 @@ function TargetPath({target}) {
 		`//${window.location.hostname}:8081/api/get-obj`,
 		{target: target, lat: session.lat,
 		 lon: session.lon, time: now, timespan: "day"});
+
 	    // Outer segments is a list of pairs, first item in the pair
 	    // being the brightness level 0-4 (day, civil, nautical
 	    // and astronomical twilight and full night)
 	    const outer_segments = [];
+
 	    // Inner segments is a list of lists, this is just so that we
 	    // can break the discontinuity at 0/360 azimuth
 	    const inner_segments = [];
+
+	    const transition_events = [];
+
+	    // Temporary arrays of points
 	    let outer_points = [];
 	    let inner_points = [];
+
+	    // Previous values, comparing these to the latest values
+	    // is used to decide when point sequences are split into
+	    // the segments
 	    let prev_x = null;
 	    let prev_y = null;
 	    let prev_brightness = null;
+	    
+	    // Latest values pulled from the remote data
 	    let x = 0;
 	    let y = 0;
 	    let brightness = null;
+	    
 	    for (const elem in response.data.series) {
 		x = stageSize.get("azToPx")(response.data.series[elem].az);
 		y = stageSize.get("altToPx")(response.data.series[elem].alt);
 		brightness = altToBrightness(response.data.series[elem]);
+
 		if (prev_x != null && prev_x > x) {
 		    // Segment wrapped around the right side of the stage,
 		    // break up the line into segments to avoid drawing a
@@ -110,18 +127,27 @@ function TargetPath({target}) {
 		    inner_points = [];
 		    outer_segments.push([brightness, outer_points]);
 		    outer_points = [];
+		    prev_brightness = null;
 		}
-		outer_points.push(x);
-		outer_points.push(y);
+
 		inner_points.push(x);
 		inner_points.push(y);
+		
 		if (prev_brightness != null && prev_brightness != brightness) {
 		    // The path crossed a brightness limit, break it into
 		    // a separate segment marked with the brigness. XXX
 		    // needs interpolation so that we can cut the segment
 		    // at the exact point.
+		    const [dx, dy] = interpolateTransition(
+			prev_x, prev_y, x, y, prev_brightness, brightness);
+		    transition_events.push({x: dx, y: dy, b: brightness});
+		    outer_points.push(dx);
+		    outer_points.push(dy);
 		    outer_segments.push([prev_brightness, outer_points]);
-		    outer_points = [x, y];
+		    outer_points = [dx, dy];
+		} else {
+		    outer_points.push(x);
+		    outer_points.push(y);
 		}
 		prev_brightness = brightness;
 		prev_x = x;
@@ -130,7 +156,8 @@ function TargetPath({target}) {
 	    inner_segments.push(inner_points);
 	    outer_segments.push([brightness, outer_points]);
 	    setRemoteProps({inner_segments: inner_segments,
-			    outer_segments: outer_segments});
+			    outer_segments: outer_segments,
+			    transition_events: transition_events});
 	} catch (error) {
 	    console.error("/get-obj series fetch failed:", error); 
 	}
@@ -148,13 +175,26 @@ function TargetPath({target}) {
 	</Line>)
 
     const innerSegments = remoteProps.inner_segments.map(seg =>
-	<Line points={seg} strokeWidth={2} 
+	<Line points={seg} strokeWidth={1} 
 	      stroke={target == "sun" ? "yellow" : "white"} tension={1}>
 	</Line>)
+
+    const transitionEvents = remoteProps.transition_events.map(ev =>
+	<Label x={ev.x} y={ev.y} opacity={0.75}>
+	    <Tag fill="white" pointerDirection="up" pointerHeight={8}
+		 pointerWidth={5} stroke="black" strokeWidth={1}>
+	    </Tag>
+	    <Text fill="black" padding={1} align="center"
+		  fontFamily="Verdana" fontSize={12} 
+		  text={["N", "AT", "NT", "CT", "D"][ev.b] +
+			"\n" + "12" + "\n" + "34"}>
+	    </Text>
+	</Label>)
 	
     return (<Group>
 		{outerSegments}
 		{innerSegments}
+		{transitionEvents}
 	    </Group>);
 };
 

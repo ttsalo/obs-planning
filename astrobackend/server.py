@@ -10,10 +10,14 @@ from astropy.coordinates import get_body
 
 app = Flask(__name__)
 
+
 @app.route("/")
 def index():
     return "<p>Use the API</p>"
 
+
+#@app.before_request
+#def get_options():
 @app.route("/api/get-obj", methods=['OPTIONS'])
 def get_obj_options():
     resp = make_response()
@@ -21,6 +25,7 @@ def get_obj_options():
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return resp
+
 
 @app.route("/api/get-obj", methods=['POST'])
 def get_obj():
@@ -40,7 +45,7 @@ def get_obj():
                     AltAz(obstime=t["time"], location=loc)) for t in ts]
                 resp = make_response(
                     {"series": [{"alt": i[0].alt.deg, "az": i[0].az.deg,
-                                 "sun_alt": i[1].alt.deg}
+                                 "sun_alt": i[1].alt.deg, "ts": i[0].obstime}
                                 for i in zip(aas, sun_aas)]})
             else:
                 resp = make_response({"series": [{"alt": aa.alt.deg,
@@ -65,7 +70,7 @@ def get_obj():
         resp = make_response({"alt": aa.alt.deg, "az": aa.az.deg,
                               "radius": radius})
 
-    resp.headers["Access-Control-Allow-Origin"] = request.headers["Origin"]
+    resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin")
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
 
