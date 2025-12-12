@@ -43,15 +43,18 @@ def get_obj():
             if not data["target"] == "sun":
                 sun_aas = [get_body("sun", t["time"], loc).transform_to(
                     AltAz(obstime=t["time"], location=loc)) for t in ts]
+                sun_radius = 696340.0 / sun_aas[0].distance.km * 180 / math.pi
                 resp = make_response(
                     {"series": [{"alt": i[0].alt.deg, "az": i[0].az.deg,
-                                 "sun_alt": i[1].alt.deg,
+                                 "sun_alt": i[1].alt.deg + sun_radius,
                                  "ts": i[0].obstime.value}
                                 for i in zip(aas, sun_aas)]})
             else:
+                sun_radius = 696340.0 / aas[0].distance.km * 180 / math.pi
                 resp = make_response({"series": [{"alt": aa.alt.deg,
-                                                  "sun_alt": aa.alt.deg,
                                                   "az": aa.az.deg,
+                                                  "sun_alt": aa.alt.deg +
+                                                  sun_radius,
                                                   "ts": aa.obstime.value}
                                                  for aa in aas]})
     else:

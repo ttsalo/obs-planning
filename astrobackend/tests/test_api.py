@@ -42,7 +42,7 @@ def test_get_obj(client, obj):
     assert isinstance(response.json["radius"], float)
 
     
-@pytest.mark.parametrize("obj", ["sun", "moon"])
+@pytest.mark.parametrize("obj", ["sun", "moon", "jupiter"])
 def test_get_obj_timeseries(client, obj):
     response = client.post("/api/get-obj",
             json={"target": obj, "lat": 60, "lon": 24, "timespan": "day",
@@ -53,3 +53,10 @@ def test_get_obj_timeseries(client, obj):
     assert isinstance(response.json["series"][0]["sun_alt"], float)
     assert "2025-12-10T22:42:33.015" in response.json["series"][0]["ts"]
 
+
+def test_get_obj_sunrise(client):
+    response = client.post("/api/get-obj",
+            json={"target": "sun", "lat": 60.21, "lon": 24.85,
+                  "time": "2025-12-12T07:15:00.000Z"})
+    assert response.status_code == 200
+    assert (response.json["alt"] + response.json["radius"]) == 0

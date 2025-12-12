@@ -51,7 +51,7 @@ function TargetPath({target}) {
     const [remoteProps, setRemoteProps] = useState(null);
 
     function altToBrightness(elem) {
-	const alt = (target == "sun" ? elem.alt : elem.sun_alt);
+	const alt = elem.sun_alt;
 	if (alt >= 0) return 4;
 	if (alt >= -6) return 3;
 	if (alt >= -12) return 2;
@@ -71,12 +71,13 @@ function TargetPath({target}) {
 
     // The line segment is crossing a brightness transition, interpolate
     // the exact point where that happens
-    function interpolateTransition(x1, y1, x2, y2, b1, b2) {
+    function interpolateTransition(x1, y1, sy1, ts1, x2, y2, sy2, ts2, b1, b2) {
 	const alt = brightnessChangeToAlt(b1, b2);
 	const altPx = stageSize.get("altToPx")(alt);
-	const d = (y1 - altPx) / (y1 - y2);
+	const d = (sy1 - altPx) / (sy1 - sy2);
 	console.log(`${target} crossed ${alt} with ratio ${d}`);
-	return [x1 + ((x2 - x1) * d), y1 + ((y2 - y1) * d)];
+	return [x1 + ((x2 - x1) * d), y1 + ((y2 - y1) * d),
+		new Date(ts1.getTime() + ((ts2 - ts1) * d))];
     };
 
     const fetchDataSeries = async () => {
@@ -107,16 +108,23 @@ function TargetPath({target}) {
 	    // the segments
 	    let prev_x = null;
 	    let prev_y = null;
+	    let prev_sy = null;
+	    let prev_ts = null;
 	    let prev_brightness = null;
 	    
 	    // Latest values pulled from the remote data
 	    let x = 0;
 	    let y = 0;
+	    let sy = 0;
+	    let ts = null;
 	    let brightness = null;
 	    
 	    for (const elem in response.data.series) {
 		x = stageSize.get("azToPx")(response.data.series[elem].az);
 		y = stageSize.get("altToPx")(response.data.series[elem].alt);
+		sy = stageSize.get("altToPx")(
+		    response.data.series[elem].sun_alt);
+		ts = new Date(response.data.series[elem].ts);
 		brightness = altToBrightness(response.data.series[elem]);
 
 		if (prev_x != null && prev_x > x) {
@@ -138,9 +146,11 @@ function TargetPath({target}) {
 		    // a separate segment marked with the brigness. XXX
 		    // needs interpolation so that we can cut the segment
 		    // at the exact point.
-		    const [dx, dy] = interpolateTransition(
-			prev_x, prev_y, x, y, prev_brightness, brightness);
-		    transition_events.push({x: dx, y: dy, b: brightness});
+		    const [dx, dy, dts] = interpolateTransition(
+			prev_x, prev_y, prev_sy, prev_ts,
+			x, y, sy, ts, prev_brightness, brightness);
+		    transition_events.push({x: dx, y: dy, ts: dts,
+					    b: brightness});
 		    outer_points.push(dx);
 		    outer_points.push(dy);
 		    outer_segments.push([prev_brightness, outer_points]);
@@ -152,6 +162,8 @@ function TargetPath({target}) {
 		prev_brightness = brightness;
 		prev_x = x;
 		prev_y = y;
+		prev_sy = sy;
+		prev_ts = ts;
 	    };
 	    inner_segments.push(inner_points);
 	    outer_segments.push([brightness, outer_points]);
@@ -186,8 +198,9 @@ function TargetPath({target}) {
 	    </Tag>
 	    <Text fill="black" padding={1} align="center"
 		  fontFamily="Verdana" fontSize={12} 
-		  text={["N", "AT", "NT", "CT", "D"][ev.b] +
-			"\n" + "12" + "\n" + "34"}>
+		  text={["N", "AT", "NT", "CT", "D"][ev.b] + "\n" +
+			String(ev.ts.getHours()).padStart(2, "0") + "\n" +
+			String(ev.ts.getMinutes()).padStart(2, "0")}>
 	    </Text>
 	</Label>)
 	
