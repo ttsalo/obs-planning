@@ -6,7 +6,7 @@ build: test
 	docker build -t obs-planner-server .
 	docker tag obs-planner-server $(AWS_REPOSITORY_URI)
 
-test:
+check:
 	go test
 
 push:
