@@ -47,7 +47,7 @@ def get_obj():
                 resp = make_response(
                     {"series": [{"alt": i[0].alt.deg, "az": i[0].az.deg,
                                  "sun_alt": i[1].alt.deg + sun_radius,
-                                 "ts": i[0].obstime.value}
+                                 "ts": i[0].obstime.value + "Z"}
                                 for i in zip(aas, sun_aas)]})
             else:
                 sun_radius = 696340.0 / aas[0].distance.km * 180 / math.pi
@@ -55,7 +55,7 @@ def get_obj():
                                                   "az": aa.az.deg,
                                                   "sun_alt": aa.alt.deg +
                                                   sun_radius,
-                                                  "ts": aa.obstime.value}
+                                                  "ts": aa.obstime.value + "Z"}
                                                  for aa in aas]})
     else:
         t = Time(data["time"])
