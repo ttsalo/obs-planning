@@ -1,5 +1,52 @@
 # obs-planning
+
 Graphical astronomical observations planning utility
+
+## Purpose
+
+The idea is to answer the question "is there something intereasting
+to observe in a given part of the sky in a specific window of time?"
+
+There are a lot of apps to show the objects in the sky, but finding
+something to look at typically requires finding the object and then
+scrolling through time and panning the view of the sky to see if
+the object can be observed. With this app it's possible to see the
+view of the whole sky during a longer time period at once.
+
+![screenshot](examples/screenshot1.png)
+
+In the example screenshot, the current position of the sun and moon are
+shown, and the future path in the sky for the next 24 hours for both.
+
+Additionally, the transition times between stages of twilight (civil,
+nautical and astronomical) and the day and night are shown. So, just from
+the path of the sun it's possible to see which direction the sun rises
+from and where it sets and when the different stages of illumination are
+happening.
+
+For both the sun and the selected object (limited to just one currently)
+the outline of the object path indicates the illumination of the sky in
+five stages from full night to full day, so it's possible to see where
+the object will be in the sky in the next 24 hours and when it will be
+dark enough to observe it. 
+
+# Future roadmap
+
+- Define the observation window (altitude and azimuth limits and time limits)
+  highlight when the observation target(s) are in the selected window
+- Search for objects based on category and visibility in the selected
+  observation window
+- User accounts, authentication and persistent user profiles
+
+# Architecture
+
+- Frontend: React with Ant Design for the overall layout and Konva for
+  the canvas for vector graphics
+- Backend: Two separate backend servers, primary one implemented in Go
+  running Echo server, secondary implemented in Python running Flask
+  and astropy for the astronomical calculations.
+- Running locally with docker compose
+- Easy deployment to AWS ECS
 
 # Setup
 - Install AWS CLI and set up SSO
@@ -26,10 +73,22 @@ npm run build
 # Run backend image locally
 `make runserver`
 
-## Push the latest backend image to AWS
+UI will be reachable in http://localhost:8080/
+
+## Push the latest images to AWS
+
+Run separately in `backend` and `astrobackend`.
+
 ```
-cd backend
+make createrepository
 make push
+```
+
+Repositories are billable resources in AWS so they needs to be deleted 
+afterwards.
+
+```
+make deleterepository
 ```
 
 # Set up CDK (one-time setup in the repo)
@@ -55,7 +114,10 @@ Also may need to unset
 
 as these will interfere with the sso login, whose details are looked up from whe AWS CLI config using `AWS_PROFILE` env variable. 
 
-# Deployment cycle of the built and pushed image
+# Deployment cycle in AWS
+
+Requirement: images need to have been pushed to AWS repositories
+
 ```
 cd obs_ecs
 cdk synth
