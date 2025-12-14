@@ -84,7 +84,7 @@ function TargetPath({target}) {
 	try {
 	    const now = new Date();
 	    const response = await axios.post(
-		`//${window.location.hostname}:8081/api/get-obj`,
+		`//${window.location.hostname}:8081/api/get-obj-timeseries`,
 		{target: target, lat: session.lat,
 		 lon: session.lon, time: now, timespan: "day"});
 

@@ -227,7 +227,11 @@ const App = () => {
 		   <Layout.Footer style={{ padding: 0 }}>
 		       <Flex justify="center" align="middle"
 			     style={{ height: '100%' }}>
+			   <Space>
 			   © Tomi T. Salo 2025
+			   <a href={`http://${window.location.hostname}:8081/apidocs/`}>
+			   Apidoc (astro)</a>
+			   </Space>
 		       </Flex>
 		   </Layout.Footer>
 	       </Layout>

@@ -44,7 +44,7 @@ def test_get_obj(client, obj):
     
 @pytest.mark.parametrize("obj", ["sun", "moon", "jupiter"])
 def test_get_obj_timeseries(client, obj):
-    response = client.post("/api/get-obj",
+    response = client.post("/api/get-obj-timeseries",
             json={"target": obj, "lat": 60, "lon": 24, "timespan": "day",
                   "time": "2025-12-10T22:42:33.015Z"})
     assert response.status_code == 200
@@ -52,6 +52,14 @@ def test_get_obj_timeseries(client, obj):
     assert isinstance(response.json["series"][0]["alt"], float)
     assert isinstance(response.json["series"][0]["sun_alt"], float)
     assert "2025-12-10T22:42:33.015" in response.json["series"][0]["ts"]
+
+
+def test_get_obj_timeseries_validation(client):
+    response = client.post("/api/get-obj-timeseries",
+            json={"target": "sun", "lat": 60, "lon": 24, "timespan": "fortnight",
+                  "time": "2025-12-10T22:42:33.015Z"})
+    assert response.status_code == 400
+    assert "Unrecognized" in response.json["message"]
 
 
 def test_get_obj_sunrise(client):

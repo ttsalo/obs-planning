@@ -1,5 +1,6 @@
 import math
-from flask import Flask, request, make_response
+from flask import Flask, request, make_response, jsonify
+from flasgger import Swagger
 
 from astropy import units as u
 from astropy.time import Time
@@ -9,6 +10,7 @@ from astropy.coordinates import get_body
 
 
 app = Flask(__name__)
+swagger = Swagger(app) 
 
 
 @app.route("/")
@@ -16,12 +18,21 @@ def index():
     return "<p>Use the API</p>"
 
 
-#@app.before_request
-#def get_options():
-@app.route("/api/get-obj", methods=['OPTIONS'])
-def get_obj_options():
+# Return just a empty response, the access control headers will get
+# added in the after_request handler
+@app.before_request
+def get_options():
+    if request.method != 'OPTIONS':
+        return
     resp = make_response()
-    resp.headers["Access-Control-Allow-Origin"] = request.headers["Origin"]
+    return resp
+
+
+# Since this is a secondary server, we'll need to add certain access
+# control headers to every request or the browser will block access
+@app.after_request
+def add_access_control_headers(resp):
+    resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin")
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return resp
@@ -29,6 +40,36 @@ def get_obj_options():
 
 @app.route("/api/get-obj", methods=['POST'])
 def get_obj():
+    """
+    
+    """
+    data = request.get_json()
+
+    loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
+
+    t = Time(data["time"])
+    with solar_system_ephemeris.set('de432s'):
+        obj = get_body(data["target"], t, loc)
+    aa = obj.transform_to(AltAz(obstime=t, location=loc))
+    radius = math.atan(
+        {"mercury": 2439.7,
+         "venus": 6051.8,
+         "moon": 1737.4,
+         "mars": 3389.5,
+         "jupiter": 69911.0,
+         "saturn": 58232.0,
+         "uranus": 25362.0,
+         "neptunus": 24622.0,
+         "sun": 696340.0}[data["target"].lower()]
+        / obj.distance.km) * 180 / math.pi
+    resp = make_response({"alt": aa.alt.deg, "az": aa.az.deg,
+                          "radius": radius})
+    
+    return resp
+
+
+@app.route("/api/get-obj-timeseries", methods=['POST'])
+def get_obj_timeseries():
     data = request.get_json()
 
     loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
@@ -58,26 +99,7 @@ def get_obj():
                                                   "ts": aa.obstime.value + "Z"}
                                                  for aa in aas]})
     else:
-        t = Time(data["time"])
-        with solar_system_ephemeris.set('de432s'):
-            obj = get_body(data["target"], t, loc)
-        aa = obj.transform_to(AltAz(obstime=t, location=loc))
-        radius = math.atan(
-            {"mercury": 2439.7,
-             "venus": 6051.8,
-             "moon": 1737.4,
-             "mars": 3389.5,
-             "jupiter": 69911.0,
-             "saturn": 58232.0,
-             "uranus": 25362.0,
-             "neptunus": 24622.0,
-             "sun": 696340.0}[data["target"].lower()]
-            / obj.distance.km) * 180 / math.pi
-        resp = make_response({"alt": aa.alt.deg, "az": aa.az.deg,
-                              "radius": radius})
-
-    resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin")
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-
+        return jsonify({"message":
+            f"Unrecognized time period: {data.get('timespan')}"}), 400
+        
     return resp
