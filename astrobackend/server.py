@@ -168,9 +168,6 @@ def get_obj_timeseries():
                                  sun_radius,
                                  "ts": aa.obstime.value.isoformat() + "Z"}
                                 for aa in aas]})
-    else:
-        return jsonify({"message":
-            f"Unrecognized time period: {data.get('timespan')}"}), 400
         
     return resp
 

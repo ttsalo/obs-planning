@@ -81,7 +81,7 @@ def test_get_obj_timeseries_validation(client):
             json={"target": "sun", "lat": 60, "lon": 24, "timespan": "fortnight",
                   "time": "2025-12-10T22:42:33.015Z"})
     assert response.status_code == 400
-    assert "Unrecognized" in response.json["message"]
+    assert b"Must be one of" in response.data
 
 
 def test_get_obj_sunrise(client):
