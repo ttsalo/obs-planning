@@ -55,6 +55,15 @@ def test_get_obj_validation(client):
     assert b"'target' is a required property" in response.data
 
 
+def test_get_obj_ts_validation(client):
+    response = client.post("/api/get-obj-timeseries",
+            json={"target": "sun", "lat": 60, "lon": 24,
+                  "time": "2025-12-10T22:42:33.015Z",
+                  "timespn": "day"})
+    assert response.status_code == 400
+    assert b"'timespan' is a required property" in response.data
+
+
 @pytest.mark.parametrize("obj", ["sun", "moon", "jupiter"])
 def test_get_obj_timeseries(client, obj):
     response = client.post("/api/get-obj-timeseries",

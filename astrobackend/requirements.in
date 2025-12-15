@@ -1,9 +1,10 @@
-# Not in use at the moment, Amazon Linux used by containers doesn't support
-# pip-tools or the newest versions of various modules so package version
-# lockdown is not possible
+apispec
+apispec_webframeworks
 astropy
 flask
+flasgger
 gunicorn
 jplephem
-pytest
+marshmallow
 pip-tools
+pytest

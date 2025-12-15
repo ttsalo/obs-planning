@@ -4,7 +4,6 @@ from apispec.ext.marshmallow import MarshmallowPlugin
 from apispec_webframeworks.flask import FlaskPlugin
 from flask import Flask, request, make_response, jsonify
 from flasgger import APISpec, Swagger, Schema, fields, validate, swag_from
-from flasgger_marshmallow import swagger_decorator
 from http import HTTPStatus
 
 from astropy import units as u
@@ -17,14 +16,14 @@ from astropy.coordinates import get_body
 app = Flask(__name__)
 
 
-class GetObjQuerySchema(Schema):
+class GetObjPostSchema(Schema):
     lat = fields.Float(required=True)
     lon = fields.Float(required=True)
     time = fields.DateTime(required=True)
     target = fields.String(required=True)
 
 
-class GetObjTSQuerySchema(Schema):
+class GetObjTSPostSchema(Schema):
     lat = fields.Float(required=True)
     lon = fields.Float(required=True)
     time = fields.DateTime(required=True)
@@ -91,27 +90,20 @@ def add_access_control_headers(resp):
     return resp
 
 
-get_obj_query_schema = GetObjQuerySchema()
+get_obj_query_schema = GetObjPostSchema()
 get_obj_result_schema = GetObjResultSchema()
-get_obj_ts_query_schema = GetObjTSQuerySchema()
+get_obj_ts_query_schema = GetObjTSPostSchema()
 get_obj_ts_result_schema = GetObjTSResultSchema()
 
 
 @app.route("/api/get-obj", methods=['POST'], swag=True)
-def get_obj(body: GetObjQuerySchema):
+def get_obj(body: GetObjPostSchema):
     """
     Return the altitude and azimuth of a given observation target
     ---
     description:
       Return the altitude and azimuth of a given observation target as seen
       from a given location at a specified time.
-    post:
-      parameters: 
-        - in: body
-          name: body
-          required: True
-          schema:
-            $ref: '#/definitions/GetObjQuerySchema'
     responses:
       200:
         description: Observation details successfully calculated.
@@ -143,20 +135,13 @@ def get_obj(body: GetObjQuerySchema):
 
 
 @app.route("/api/get-obj-timeseries", methods=['POST'], swag=True)
-def get_obj_timeseries(body: GetObjTSQuerySchema):
+def get_obj_timeseries(body: GetObjTSPostSchema):
     """
     Return the altitude and azimuth time series of a given observation target
     ---
     description:
       Return the altitude and azimuth of a given observation target as seen
       from a given location at intervals in a given time period.
-    post:
-      parameters: 
-        - in: body
-          name: body
-          required: True
-          schema:
-            $ref: '#/definitions/GetObjTSQuerySchema'
     responses:
       200:
         description: Observation time series successfully calculated.
