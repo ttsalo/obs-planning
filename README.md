@@ -44,7 +44,9 @@ dark enough to observe it.
   the canvas for vector graphics
 - Backend: Two separate backend servers, primary one implemented in Go
   running Echo server, secondary implemented in Python running Flask
-  and astropy for the astronomical calculations.
+  and astropy for the astronomical calculations. Purpose of this is to
+  keep the primary server responsive even if the secondary is handling
+  a lot of heavy calculations and to allow differential resource scaling.
 - Running locally with docker compose
 - Easy deployment to AWS ECS
 
@@ -69,6 +71,9 @@ npm run build
 
 # Build backend image (includes UI build)
 `make build`
+
+# Run unit tests (sequentially for UI code, Go server and Python server)
+`make check`
 
 # Run backend image locally
 `make runserver`
