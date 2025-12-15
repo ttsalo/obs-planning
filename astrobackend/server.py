@@ -12,41 +12,9 @@ from astropy.timeseries import TimeSeries
 from astropy.coordinates import solar_system_ephemeris, EarthLocation, AltAz
 from astropy.coordinates import get_body
 
+import schemas
 
 app = Flask(__name__)
-
-
-class GetObjPostSchema(Schema):
-    lat = fields.Float(required=True)
-    lon = fields.Float(required=True)
-    time = fields.DateTime(required=True)
-    target = fields.String(required=True)
-
-
-class GetObjTSPostSchema(Schema):
-    lat = fields.Float(required=True)
-    lon = fields.Float(required=True)
-    time = fields.DateTime(required=True)
-    timespan = fields.String(required=True)
-    target = fields.String(required=True)
-
-
-class GetObjResultSchema(Schema):
-    alt = fields.Float(required=True)
-    az = fields.Float(required=True)
-    radius = fields.Float(required=True)
-    
-
-class GetObjTSPointSchema(Schema):
-    alt = fields.Float(required=True)
-    az = fields.Float(required=True)
-    sun_alt = fields.Float(required=True)
-    ts = fields.DateTime(required=True)
-
-
-class GetObjTSResultSchema(Schema):
-    series = fields.List(
-        fields.Nested(GetObjTSPointSchema))
 
     
 spec = APISpec(
@@ -61,10 +29,10 @@ spec = APISpec(
 
 swag = Swagger(app, template=spec.to_flasgger(
         app,
-        definitions=[GetObjResultSchema,
-                     GetObjPostSchema,
-                     GetObjTSPostSchema,
-                     GetObjTSResultSchema]))
+        definitions=[schemas.GetObjResultSchema,
+                     schemas.GetObjPostSchema,
+                     schemas.GetObjTSPostSchema,
+                     schemas.GetObjTSResultSchema]))
 
 
 @app.route("/")
@@ -92,10 +60,10 @@ def add_access_control_headers(resp):
     return resp
 
 
-get_obj_post_schema = GetObjPostSchema()
-get_obj_result_schema = GetObjResultSchema()
-get_obj_ts_post_schema = GetObjTSPostSchema()
-get_obj_ts_result_schema = GetObjTSResultSchema()
+get_obj_post_schema = schemas.GetObjPostSchema()
+get_obj_result_schema = schemas.GetObjResultSchema()
+get_obj_ts_post_schema = schemas.GetObjTSPostSchema()
+get_obj_ts_result_schema = schemas.GetObjTSResultSchema()
 
 
 @app.route("/api/get-obj", methods=['POST'], swag=True)
@@ -120,7 +88,7 @@ def get_obj():
           $ref: '#/definitions/GetObjResult'
     """
     try:
-        data = GetObjPostSchema().load(request.json)
+        data = get_obj_post_schema.load(request.json)
     except Exception as err:
         return jsonify(err.messages), 400
     #data = request.get_json()
@@ -169,7 +137,7 @@ def get_obj_timeseries():
           $ref: '#/definitions/GetObjTSResult'
     """
     try:
-        data = GetObjTSPostSchema().load(request.json)
+        data = get_obj_ts_post_schema.load(request.json)
     except Exception as err:
         return jsonify(err.messages), 400
 
