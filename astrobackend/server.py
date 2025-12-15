@@ -1,6 +1,11 @@
 import math
+
+from apispec.ext.marshmallow import MarshmallowPlugin
+from apispec_webframeworks.flask import FlaskPlugin
 from flask import Flask, request, make_response, jsonify
-from flasgger import Swagger
+from flasgger import APISpec, Swagger, Schema, fields, validate, swag_from
+from flasgger_marshmallow import swagger_decorator
+from http import HTTPStatus
 
 from astropy import units as u
 from astropy.time import Time
@@ -10,7 +15,55 @@ from astropy.coordinates import get_body
 
 
 app = Flask(__name__)
-swagger = Swagger(app) 
+
+
+class GetObjQuerySchema(Schema):
+    lat = fields.Float(required=True)
+    lon = fields.Float(required=True)
+    time = fields.DateTime(required=True)
+    target = fields.String(required=True)
+
+
+class GetObjTSQuerySchema(Schema):
+    lat = fields.Float(required=True)
+    lon = fields.Float(required=True)
+    time = fields.DateTime(required=True)
+    timespan = fields.String(required=True)
+    target = fields.String(required=True)
+
+
+class GetObjResultSchema(Schema):
+    alt = fields.Float(required=True)
+    az = fields.Float(required=True)
+    radius = fields.Float(required=True)
+    
+
+class GetObjTSPointSchema(Schema):
+    alt = fields.Float(required=True)
+    az = fields.Float(required=True)
+    sun_alt = fields.Float(required=True)
+    ts = fields.DateTime(required=True)
+
+
+class GetObjTSResultSchema(Schema):
+    series = fields.List(
+        fields.Nested(GetObjTSPointSchema))
+
+    
+spec = APISpec(
+    title='Observations Planner Astro API',
+    version='1.0.0',
+    openapi_version='2.0',
+    plugins=[
+        FlaskPlugin(),
+        MarshmallowPlugin(),
+    ],
+)
+
+swag = Swagger(app, template=spec.to_flasgger(
+        app,
+        definitions=[GetObjResultSchema,
+                     GetObjTSResultSchema]))
 
 
 @app.route("/")
@@ -38,10 +91,32 @@ def add_access_control_headers(resp):
     return resp
 
 
-@app.route("/api/get-obj", methods=['POST'])
-def get_obj():
+get_obj_query_schema = GetObjQuerySchema()
+get_obj_result_schema = GetObjResultSchema()
+get_obj_ts_query_schema = GetObjTSQuerySchema()
+get_obj_ts_result_schema = GetObjTSResultSchema()
+
+
+@app.route("/api/get-obj", methods=['POST'], swag=True)
+def get_obj(body: GetObjQuerySchema):
     """
-    
+    Return the altitude and azimuth of a given observation target
+    ---
+    description:
+      Return the altitude and azimuth of a given observation target as seen
+      from a given location at a specified time.
+    post:
+      parameters: 
+        - in: body
+          name: body
+          required: True
+          schema:
+            $ref: '#/definitions/GetObjQuerySchema'
+    responses:
+      200:
+        description: Observation details successfully calculated.
+        schema:
+          $ref: '#/definitions/GetObjResult'
     """
     data = request.get_json()
 
@@ -62,14 +137,32 @@ def get_obj():
          "neptunus": 24622.0,
          "sun": 696340.0}[data["target"].lower()]
         / obj.distance.km) * 180 / math.pi
-    resp = make_response({"alt": aa.alt.deg, "az": aa.az.deg,
-                          "radius": radius})
-    
-    return resp
+    return jsonify(get_obj_result_schema.dump({"alt": aa.alt.deg,
+                                               "az": aa.az.deg,
+                                               "radius": radius})), 200
 
 
-@app.route("/api/get-obj-timeseries", methods=['POST'])
-def get_obj_timeseries():
+@app.route("/api/get-obj-timeseries", methods=['POST'], swag=True)
+def get_obj_timeseries(body: GetObjTSQuerySchema):
+    """
+    Return the altitude and azimuth time series of a given observation target
+    ---
+    description:
+      Return the altitude and azimuth of a given observation target as seen
+      from a given location at intervals in a given time period.
+    post:
+      parameters: 
+        - in: body
+          name: body
+          required: True
+          schema:
+            $ref: '#/definitions/GetObjTSQuerySchema'
+    responses:
+      200:
+        description: Observation time series successfully calculated.
+        schema:
+          $ref: '#/definitions/GetObjTSResult'
+    """
     data = request.get_json()
 
     loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
@@ -103,3 +196,4 @@ def get_obj_timeseries():
             f"Unrecognized time period: {data.get('timespan')}"}), 400
         
     return resp
+

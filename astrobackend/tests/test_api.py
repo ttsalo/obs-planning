@@ -31,6 +31,11 @@ def test_root(client):
     assert b"<p>Use the API</p>" in response.data
 
     
+def test_apidocs(client):
+    response = client.get("/apidocs/")
+    assert response.status_code == 200
+
+    
 @pytest.mark.parametrize("obj", ["sun", "moon"])
 def test_get_obj(client, obj):
     response = client.post("/api/get-obj",
@@ -42,6 +47,14 @@ def test_get_obj(client, obj):
     assert isinstance(response.json["radius"], float)
 
     
+def test_get_obj_validation(client):
+    response = client.post("/api/get-obj",
+            json={"trget": "sun", "lat": 60, "lon": 24,
+                  "time": "2025-12-10T22:42:33.015Z"})
+    assert response.status_code == 400
+    assert b"'target' is a required property" in response.data
+
+
 @pytest.mark.parametrize("obj", ["sun", "moon", "jupiter"])
 def test_get_obj_timeseries(client, obj):
     response = client.post("/api/get-obj-timeseries",

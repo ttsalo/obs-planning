@@ -1,6 +1,10 @@
+apispec
+apispec_webframeworks
 astropy
 flask
-flasgger
+flasgger-marshmallow
 gunicorn
 jplephem
+marshmallow
+marshmallow-objects
 pytest
