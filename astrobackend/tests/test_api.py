@@ -52,7 +52,7 @@ def test_get_obj_validation(client):
             json={"trget": "sun", "lat": 60, "lon": 24,
                   "time": "2025-12-10T22:42:33.015Z"})
     assert response.status_code == 400
-    assert b"'target' is a required property" in response.data
+    assert b"Missing data for required field." in response.data
 
 
 def test_get_obj_ts_validation(client):
@@ -61,7 +61,7 @@ def test_get_obj_ts_validation(client):
                   "time": "2025-12-10T22:42:33.015Z",
                   "timespn": "day"})
     assert response.status_code == 400
-    assert b"'timespan' is a required property" in response.data
+    assert b"Missing data for required field." in response.data
 
 
 @pytest.mark.parametrize("obj", ["sun", "moon", "jupiter"])

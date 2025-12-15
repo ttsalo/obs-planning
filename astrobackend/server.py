@@ -62,6 +62,8 @@ spec = APISpec(
 swag = Swagger(app, template=spec.to_flasgger(
         app,
         definitions=[GetObjResultSchema,
+                     GetObjPostSchema,
+                     GetObjTSPostSchema,
                      GetObjTSResultSchema]))
 
 
@@ -90,27 +92,38 @@ def add_access_control_headers(resp):
     return resp
 
 
-get_obj_query_schema = GetObjPostSchema()
+get_obj_post_schema = GetObjPostSchema()
 get_obj_result_schema = GetObjResultSchema()
-get_obj_ts_query_schema = GetObjTSPostSchema()
+get_obj_ts_post_schema = GetObjTSPostSchema()
 get_obj_ts_result_schema = GetObjTSResultSchema()
 
 
 @app.route("/api/get-obj", methods=['POST'], swag=True)
-def get_obj(body: GetObjPostSchema):
+def get_obj():
     """
     Return the altitude and azimuth of a given observation target
     ---
     description:
       Return the altitude and azimuth of a given observation target as seen
       from a given location at a specified time.
+    parameters:
+      - name: body
+        in: body
+        required: true
+        description: Observation place, time and target
+        schema:
+          $ref: '#/definitions/GetObjPost'
     responses:
       200:
         description: Observation details successfully calculated.
         schema:
           $ref: '#/definitions/GetObjResult'
     """
-    data = request.get_json()
+    try:
+        data = GetObjPostSchema().load(request.json)
+    except Exception as err:
+        return jsonify(err.messages), 400
+    #data = request.get_json()
 
     loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
 
@@ -135,20 +148,30 @@ def get_obj(body: GetObjPostSchema):
 
 
 @app.route("/api/get-obj-timeseries", methods=['POST'], swag=True)
-def get_obj_timeseries(body: GetObjTSPostSchema):
+def get_obj_timeseries():
     """
     Return the altitude and azimuth time series of a given observation target
     ---
     description:
       Return the altitude and azimuth of a given observation target as seen
       from a given location at intervals in a given time period.
+    parameters:
+      - name: body
+        in: body
+        required: true
+        description: Observation place, time, timespan and target
+        schema:
+          $ref: '#/definitions/GetObjTSPost'
     responses:
       200:
         description: Observation time series successfully calculated.
         schema:
           $ref: '#/definitions/GetObjTSResult'
     """
-    data = request.get_json()
+    try:
+        data = GetObjTSPostSchema().load(request.json)
+    except Exception as err:
+        return jsonify(err.messages), 400
 
     loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
 
@@ -166,16 +189,17 @@ def get_obj_timeseries(body: GetObjTSPostSchema):
                 resp = make_response(
                     {"series": [{"alt": i[0].alt.deg, "az": i[0].az.deg,
                                  "sun_alt": i[1].alt.deg + sun_radius,
-                                 "ts": i[0].obstime.value + "Z"}
+                                 "ts": i[0].obstime.value.isoformat() + "Z"}
                                 for i in zip(aas, sun_aas)]})
             else:
                 sun_radius = 696340.0 / aas[0].distance.km * 180 / math.pi
-                resp = make_response({"series": [{"alt": aa.alt.deg,
-                                                  "az": aa.az.deg,
-                                                  "sun_alt": aa.alt.deg +
-                                                  sun_radius,
-                                                  "ts": aa.obstime.value + "Z"}
-                                                 for aa in aas]})
+                resp = make_response(
+                    {"series": [{"alt": aa.alt.deg,
+                                 "az": aa.az.deg,
+                                 "sun_alt": aa.alt.deg +
+                                 sun_radius,
+                                 "ts": aa.obstime.value.isoformat() + "Z"}
+                                for aa in aas]})
     else:
         return jsonify({"message":
             f"Unrecognized time period: {data.get('timespan')}"}), 400
