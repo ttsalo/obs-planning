@@ -28,7 +28,10 @@ For both the sun and the selected object (limited to just one currently)
 the outline of the object path indicates the illumination of the sky in
 five stages from full night to full day, so it's possible to see where
 the object will be in the sky in the next 24 hours and when it will be
-dark enough to observe it. 
+dark enough to observe it.
+
+Once loaded, the current position of the sun and the target object will
+be automatically updated once per minute.
 
 # Future roadmap
 
@@ -56,6 +59,15 @@ dark enough to observe it.
 - Install docker
 - Install golang
 - Install node.js: `nvm install 22`
+
+# Set up venv in astrobackend
+
+```
+cd astrobackend
+python3 -m venv .astrovenv
+source .astrovenv/bin/activate
+pip install -r requirements.txt
+```
 
 # Set up React (one-time setup in the repo)
 ```
@@ -89,8 +101,8 @@ make createrepository
 make push
 ```
 
-Repositories are billable resources in AWS so they needs to be deleted 
-afterwards.
+Repositories are billable resources in AWS so they should to be deleted 
+when no longer needed.
 
 ```
 make deleterepository
