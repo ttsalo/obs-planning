@@ -1,5 +1,8 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import {
+    useQuery,
+} from '@tanstack/react-query'
 import Konva from 'konva';
 import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
 	 Tag } from 'react-konva';
@@ -12,34 +15,35 @@ function Target({target, fill="white"}) {
     const stageSize = useContext(StageContext);
     const [remoteProps, setRemoteProps] = useState(null);
 
-    // Function to fetch the current position and update the component state
-    const fetchData = async () => {
-	try {
-	    const now = new Date();
-	    const response = await axios.post(
+    console.log(`Target(${target})`);
+    
+    const { isPending, error, data } = useQuery({
+	queryKey: ['targetData', target],
+	queryFn: async () => {
+	    const resp = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj`,
 		{target: target, lat: session.lat,
-		 lon: session.lon, time: now});
-	    setRemoteProps({x: stageSize.get("azToPx")(response.data.az),
-			    y: stageSize.get("altToPx")(response.data.alt),
-			    radius: response.data.radius * stageSize.get("zoom")
-			    * (target == "sun" || target == "moon" ?
-			       stageSize.get("moonzoom") :
-			       stageSize.get("planetzoom"))});
-	    // Set up a once per minute timeout to update the position.
-	    setTimeout(fetchData, 60*1000);
-	} catch (error) {
-	    console.error("/get-obj fetch failed:", error); 
-	}
-    };
-    
-    if (remoteProps == null) {
-	fetchData();
-	return null;
-    };
+		 lon: session.lon, time: new Date()});
+	    return resp.data;
+	},
+	refetchInterval: 60 * 1000
+    });
 
-    return (<Circle fill={fill} stroke="black" x={remoteProps.x}
-		    y={remoteProps.y} radius={remoteProps.radius}>
+    if (error) { console.log(`error=${error}`)};
+    if (isPending) { return null };
+    
+    console.log(`data=${data}`);
+    console.log(`Rendering object for ${target}`);
+
+    const props = {x: stageSize.get("azToPx")(data.az),
+		   y: stageSize.get("altToPx")(data.alt),
+		   radius: data.radius * stageSize.get("zoom")
+		   * (target == "sun" || target == "moon" ?
+		      stageSize.get("moonzoom") :
+		      stageSize.get("planetzoom"))}
+    
+    return (<Circle fill={fill} stroke="black" x={props.x}
+		    y={props.y} radius={props.radius}>
 	    </Circle>)
 };
 
@@ -50,6 +54,8 @@ function TargetPath({target}) {
     const stageSize = useContext(StageContext);
     const [remoteProps, setRemoteProps] = useState(null);
 
+    console.log(`TargetPath(${target})`);
+    
     function altToBrightness(elem) {
 	const alt = elem.sun_alt;
 	if (alt >= 0) return 4;
@@ -75,7 +81,7 @@ function TargetPath({target}) {
 	const alt = brightnessChangeToAlt(b1, b2);
 	const altPx = stageSize.get("altToPx")(alt);
 	const d = (sy1 - altPx) / (sy1 - sy2);
-	console.log(`${target} crossed ${alt} with ratio ${d}`);
+	//console.log(`${target} crossed ${alt} with ratio ${d}`);
 	return [x1 + ((x2 - x1) * d), y1 + ((y2 - y1) * d),
 		new Date(ts1.getTime() + ((ts2 - ts1) * d))];
     };
@@ -203,12 +209,12 @@ function TargetPath({target}) {
 			String(ev.ts.getMinutes()).padStart(2, "0")}>
 	    </Text>
 	</Label>)
-	
-    return (<Group>
+    console.log(`Rendering transition events for ${target}: ${transitionEvents}`);
+    return (<>
 		{outerSegments}
 		{innerSegments}
 		{transitionEvents}
-	    </Group>);
+	    </>);
 };
 
 // Coordinate grid component
@@ -303,7 +309,7 @@ function CoordGrid() {
 const ObsStage = () => {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
-    
+
     stageSize.forEach((value, key) => {
 	console.log(`${key} = ${value}`);
     });
@@ -316,13 +322,13 @@ const ObsStage = () => {
     return (<Layer>
 		<CoordGrid>
 		</CoordGrid>
-		<TargetPath target={session.target}>
+		<TargetPath key={session.target} target={session.target}>
 		</TargetPath>
-		<TargetPath target="sun">
+		<TargetPath key="sun" target="sun">
 		</TargetPath>
-		<Target target={session.target}>
+		<Target key={session.target} target={session.target}>
 		</Target>
-		<Target target="sun" fill="yellow">
+		<Target key="sun" target="sun" fill="yellow">
 		</Target>
 	    </Layer>
 	   )
