@@ -13,7 +13,6 @@ import { SessionContext, StageContext } from './session.jsx'
 function Target({target, fill="white"}) {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
-    const [remoteProps, setRemoteProps] = useState(null);
 
     console.log(`Target(${target})`);
     
@@ -52,7 +51,6 @@ function Target({target, fill="white"}) {
 function TargetPath({target}) {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
-    const [remoteProps, setRemoteProps] = useState(null);
 
     console.log(`TargetPath(${target})`);
     
@@ -86,118 +84,113 @@ function TargetPath({target}) {
 		new Date(ts1.getTime() + ((ts2 - ts1) * d))];
     };
 
-    const fetchDataSeries = async () => {
-	try {
-	    const now = new Date();
-	    const response = await axios.post(
+    const { isPending, error, data } = useQuery({
+	queryKey: ['targetPathData', target],
+	queryFn: async () => {
+	    const resp = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj-timeseries`,
 		{target: target, lat: session.lat,
-		 lon: session.lon, time: now, timespan: "day"});
+		 lon: session.lon, time: new Date(), timespan: "day"});
+	    return resp.data;
+	},
+	refetchInterval: 30 * 60 * 1000
+    });
 
-	    // Outer segments is a list of pairs, first item in the pair
-	    // being the brightness level 0-4 (day, civil, nautical
-	    // and astronomical twilight and full night)
-	    const outer_segments = [];
+    if (error) { console.log(`error=${error}`)};
+    if (isPending) { return null };
 
-	    // Inner segments is a list of lists, this is just so that we
-	    // can break the discontinuity at 0/360 azimuth
-	    const inner_segments = [];
+    // Outer segments is a list of pairs, first item in the pair
+    // being the brightness level 0-4 (day, civil, nautical
+    // and astronomical twilight and full night)
+    const outer_segments = [];
+    
+    // Inner segments is a list of lists, this is just so that we
+    // can break the discontinuity at 0/360 azimuth
+    const inner_segments = [];
 
-	    const transition_events = [];
+    const transition_events = [];
 
-	    // Temporary arrays of points
-	    let outer_points = [];
-	    let inner_points = [];
-
-	    // Previous values, comparing these to the latest values
-	    // is used to decide when point sequences are split into
-	    // the segments
-	    let prev_x = null;
-	    let prev_y = null;
-	    let prev_sy = null;
-	    let prev_ts = null;
-	    let prev_brightness = null;
-	    
-	    // Latest values pulled from the remote data
-	    let x = 0;
-	    let y = 0;
-	    let sy = 0;
-	    let ts = null;
-	    let brightness = null;
-	    
-	    for (const elem in response.data.series) {
-		x = stageSize.get("azToPx")(response.data.series[elem].az);
-		y = stageSize.get("altToPx")(response.data.series[elem].alt);
-		sy = stageSize.get("altToPx")(
-		    response.data.series[elem].sun_alt);
-		ts = new Date(response.data.series[elem].ts);
-		brightness = altToBrightness(response.data.series[elem]);
-
-		if (prev_x != null && prev_x > x) {
-		    // Segment wrapped around the right side of the stage,
-		    // break up the line into segments to avoid drawing a
-		    // line back to left across the stage. 
-		    inner_segments.push(inner_points);
-		    inner_points = [];
-		    outer_segments.push([brightness, outer_points]);
-		    outer_points = [];
-		    prev_brightness = null;
-		}
-
-		inner_points.push(x);
-		inner_points.push(y);
-		
-		if (prev_brightness != null && prev_brightness != brightness) {
-		    // The path crossed a brightness limit, break it into
-		    // a separate segment marked with the brigness. XXX
-		    // needs interpolation so that we can cut the segment
-		    // at the exact point.
-		    const [dx, dy, dts] = interpolateTransition(
-			prev_x, prev_y, prev_sy, prev_ts,
-			x, y, sy, ts, prev_brightness, brightness);
-		    transition_events.push({x: dx, y: dy, ts: dts,
-					    b: brightness});
-		    outer_points.push(dx);
-		    outer_points.push(dy);
-		    outer_segments.push([prev_brightness, outer_points]);
-		    outer_points = [dx, dy];
-		} else {
-		    outer_points.push(x);
-		    outer_points.push(y);
-		}
-		prev_brightness = brightness;
-		prev_x = x;
-		prev_y = y;
-		prev_sy = sy;
-		prev_ts = ts;
-	    };
+    // Temporary arrays of points
+    let outer_points = [];
+    let inner_points = [];
+    
+    // Previous values, comparing these to the latest values
+    // is used to decide when point sequences are split into
+    // the segments
+    let prev_x = null;
+    let prev_y = null;
+    let prev_sy = null;
+    let prev_ts = null;
+    let prev_brightness = null;
+    
+    // Latest values pulled from the remote data
+    let x = 0;
+    let y = 0;
+    let sy = 0;
+    let ts = null;
+    let brightness = null;
+    
+    for (const elem in data.series) {
+	x = stageSize.get("azToPx")(data.series[elem].az);
+	y = stageSize.get("altToPx")(data.series[elem].alt);
+	sy = stageSize.get("altToPx")(
+	    data.series[elem].sun_alt);
+	ts = new Date(data.series[elem].ts);
+	brightness = altToBrightness(data.series[elem]);
+	
+	if (prev_x != null && prev_x > x) {
+	    // Segment wrapped around the right side of the stage,
+	    // break up the line into segments to avoid drawing a
+	    // line back to left across the stage. 
 	    inner_segments.push(inner_points);
+	    inner_points = [];
 	    outer_segments.push([brightness, outer_points]);
-	    setRemoteProps({inner_segments: inner_segments,
-			    outer_segments: outer_segments,
-			    transition_events: transition_events});
-	} catch (error) {
-	    console.error("/get-obj series fetch failed:", error); 
+	    outer_points = [];
+	    prev_brightness = null;
 	}
+	
+	inner_points.push(x);
+	inner_points.push(y);
+	
+	if (prev_brightness != null && prev_brightness != brightness) {
+	    // The path crossed a brightness limit, break it into
+	    // a separate segment marked with the brigness. XXX
+	    // needs interpolation so that we can cut the segment
+	    // at the exact point.
+	    const [dx, dy, dts] = interpolateTransition(
+		prev_x, prev_y, prev_sy, prev_ts,
+		x, y, sy, ts, prev_brightness, brightness);
+	    transition_events.push({x: dx, y: dy, ts: dts,
+				    b: brightness});
+	    outer_points.push(dx);
+	    outer_points.push(dy);
+	    outer_segments.push([prev_brightness, outer_points]);
+	    outer_points = [dx, dy];
+	} else {
+	    outer_points.push(x);
+	    outer_points.push(y);
+	}
+	prev_brightness = brightness;
+	prev_x = x;
+	prev_y = y;
+	prev_sy = sy;
+	prev_ts = ts;
     };
+    inner_segments.push(inner_points);
+    outer_segments.push([brightness, outer_points]);
 
-    if (remoteProps == null) {
-	fetchDataSeries();
-	return null;
-    };
-
-    const outerSegments = remoteProps.outer_segments.map(seg =>
+    const outerSegs = outer_segments.map(seg =>
 	<Line points={seg[1]} strokeWidth={5} 
 	      stroke={brightnessToColor[seg[0]]} tension={1}
 	      shadowColor={brightnessToColor[seg[0]]} shadowBlur={10}>
 	</Line>)
 
-    const innerSegments = remoteProps.inner_segments.map(seg =>
+    const innerSegs = inner_segments.map(seg =>
 	<Line points={seg} strokeWidth={1} 
 	      stroke={target == "sun" ? "yellow" : "white"} tension={1}>
 	</Line>)
 
-    const transitionEvents = remoteProps.transition_events.map(ev =>
+    const transitionEvs = transition_events.map(ev =>
 	<Label x={ev.x} y={ev.y} opacity={0.75}>
 	    <Tag fill="white" pointerDirection="up" pointerHeight={8}
 		 pointerWidth={5} stroke="black" strokeWidth={1}>
@@ -209,11 +202,11 @@ function TargetPath({target}) {
 			String(ev.ts.getMinutes()).padStart(2, "0")}>
 	    </Text>
 	</Label>)
-    console.log(`Rendering transition events for ${target}: ${transitionEvents}`);
+
     return (<>
-		{outerSegments}
-		{innerSegments}
-		{transitionEvents}
+		{outerSegs}
+		{innerSegs}
+		{transitionEvs}
 	    </>);
 };
 
