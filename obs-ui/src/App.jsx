@@ -149,8 +149,17 @@ const App = () => {
 			       <Select options={[
 					   { value: 'moon',
 					     label: <span>Moon</span> },
+					   { value: 'mercury',
+					     label: <span>Mercury</span> },
+					   { value: 'venus',
+					     label: <span>Venus</span> },
+					   { value: 'mars',
+					     label: <span>Mars</span> },
 					   { value: 'jupiter',
 					     label: <span>Jupiter</span> }]}
+				       default={'moon'}
+				       value={target}
+				       style={{width: '100%'}}
 				       onChange={setTarget}>
 			       </Select>
 			   </Col>

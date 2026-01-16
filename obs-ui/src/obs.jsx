@@ -31,7 +31,6 @@ function Target({target, fill="white"}) {
     if (error) { console.log(`error=${error}`)};
     if (isPending) { return null };
     
-    console.log(`data=${data}`);
     console.log(`Rendering object for ${target}`);
 
     const props = {x: stageSize.get("azToPx")(data.az),
