@@ -1,4 +1,6 @@
+astrobackend/repository.json
 backend/obs-planning-backend
 backend/repository.json
 backend/static/*
+obs_ecs/cdk.context.json
 *~
