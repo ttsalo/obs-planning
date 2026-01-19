@@ -33,7 +33,7 @@ dark enough to observe it.
 Once loaded, the current position of the sun and the target object will
 be automatically updated once per minute.
 
-# Future roadmap
+## Future roadmap
 
 - Define the observation window (altitude and azimuth limits and time limits)
   highlight when the observation target(s) are in the selected window
@@ -41,7 +41,7 @@ be automatically updated once per minute.
   observation window
 - User accounts, authentication and persistent user profiles
 
-# Architecture
+## Architecture
 
 - Frontend: React with Ant Design for the overall layout and Konva for
   the canvas for vector graphics
@@ -60,7 +60,7 @@ be automatically updated once per minute.
 - Install golang
 - Install node.js: `nvm install 22`
 
-# Set up venv in astrobackend
+## Set up venv in astrobackend
 
 ```
 cd astrobackend
@@ -69,30 +69,30 @@ source .astrovenv/bin/activate
 pip install -r requirements.txt
 ```
 
-# Set up React (one-time setup in the repo)
+## Set up React (one-time setup in the repo)
 ```
 cd backend
 npm create vite@latest
 ```
 
-# Build UI code
+## Build UI code
 ```
 cd ubs-ui
 npm run build
 ```
 
-# Build backend image for local use (includes UI build)
+## Build backend image for local use (includes UI build)
 `make build`
 
-# Run unit tests (sequentially for UI code, Go server and Python server)
+## Run unit tests (sequentially for UI code, Go server and Python server)
 `make check`
 
-# Run backend images locally
+## Run backend images locally
 `make runserver`
 
 UI will be reachable in http://localhost:8080/
 
-# Clean up unused images from docker
+## Clean up unused images from docker
 
 Docker doesn't automatically clean up old images once newer ones have
 been built and tagged, so this needs to be run every once in a while:
@@ -105,7 +105,7 @@ Repositories are billable resources in AWS so they should to be deleted
 when no longer needed:
 `make aws-cleanup`
 
-# Set up CDK (one-time setup in the repo)
+## Set up CDK (one-time setup in the repo)
 ```
 mkdir obs-ecs
 cd obs-ecs
@@ -115,7 +115,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-# Init CDK
+## Init CDK
 ```
 cd obs_ecs
 source .venv/bin/activate
@@ -128,7 +128,7 @@ Also may need to unset
 
 as these will interfere with the sso login, whose details are looked up from whe AWS CLI config using `AWS_PROFILE` env variable. 
 
-# Deployment cycle in AWS
+## Deployment cycle in AWS
 
 Requirement: images need to have been pushed to AWS repositories
 
