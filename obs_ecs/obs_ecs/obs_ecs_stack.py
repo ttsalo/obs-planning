@@ -84,14 +84,6 @@ class ObsEcsStack(cdk.Stack):
             service_name="ObsServerAPIService"
         )
 
-        # serv1.task_definition.default_container.add_health_check(
-        #     command=["CMD-SHELL", "curl -f http://localhost/health || exit 1"],
-        #     interval=Duration.seconds(30),
-        #     timeout=Duration.seconds(5),
-        #     retries=3,
-        #     start_period=Duration.seconds(60)
-        # )
-        
         db_instance.connections.allow_default_port_from(serv1.service)
 
         with open("../astrobackend/repository.json", "r") as f:
@@ -135,7 +127,7 @@ class ObsEcsStack(cdk.Stack):
             enable_execute_command=True,
         )
 
-        targetgroup2 = elbv2.ApplicationTargetGroup(
+        target_group_2 = elbv2.ApplicationTargetGroup(
             self, "TargetGroup8000",
             vpc=vpc,
             port=8000,
@@ -148,7 +140,7 @@ class ObsEcsStack(cdk.Stack):
             port=8081, # The port the ALB listens on for external requests
             protocol=elbv2.ApplicationProtocol.HTTP,
             default_action=elbv2.ListenerAction.forward(
-                target_groups=[targetgroup2]
+                target_groups=[target_group_2]
             )
         )
 
@@ -156,3 +148,23 @@ class ObsEcsStack(cdk.Stack):
         # the target port.
         serv2.connections.allow_from(alb, ec2.Port.tcp(8000),
                                      "Allow 8080 traffic from ALB")
+
+        serv1.target_group.configure_health_check(
+            path="/health",
+            port="80",
+            healthy_http_codes="200",
+            interval=cdk.Duration.seconds(30),
+            timeout=cdk.Duration.seconds(5),
+            unhealthy_threshold_count=2,
+            healthy_threshold_count=2
+        )
+        
+        target_group_2.configure_health_check(
+            path="/health",
+            port="8000",
+            healthy_http_codes="200",
+            interval=cdk.Duration.seconds(30),
+            timeout=cdk.Duration.seconds(5),
+            unhealthy_threshold_count=2,
+            healthy_threshold_count=2
+        )
