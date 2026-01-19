@@ -7,6 +7,7 @@ import aws_cdk.aws_ecs as ecs
 import aws_cdk.aws_ecs_patterns as ecsp
 import aws_cdk.aws_ecr as ecr
 import aws_cdk.aws_ec2 as ec2
+import aws_cdk.aws_rds as rds
 import aws_cdk.aws_elasticloadbalancingv2 as elbv2
 
 
@@ -24,20 +25,50 @@ class ObsEcsStack(cdk.Stack):
         vpc = ec2.Vpc(self, "ObsVpc", max_azs=2)
         cluster = ecs.Cluster(self, "ObsCluster", vpc=vpc)
 
+        db_instance = rds.DatabaseInstance(
+            self, "PostgresInstance",
+            engine=rds.DatabaseInstanceEngine.postgres(
+                version=rds.PostgresEngineVersion.VER_15
+            ),
+            instance_type=ec2.InstanceType.of(
+                ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.MICRO
+            ),
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+            ),
+            database_name="obs_db",
+        )
+
         # Create first ALB service as usual, but with an explicit cluster
         # created above.
         serv1 = ecsp.ApplicationLoadBalancedFargateService(
             self, "ObsServerService",
+            enable_execute_command=True,
             task_image_options=ecsp.ApplicationLoadBalancedTaskImageOptions(
                 image=ecs.ContainerImage.from_ecr_repository(
                     ecr.Repository.from_repository_arn(
                         scope=self, id="ObsServerRepo",
                         repository_arn=repository["repositoryArn"])),
-                container_port=80),
+                container_port=80,
+                secrets={
+                    "DB_PASSWORD": ecs.Secret.from_secrets_manager(
+                        db_instance.secret, "password"),
+                    "DB_HOST": ecs.Secret.from_secrets_manager(
+                        db_instance.secret, "host"),
+                    "DB_USER": ecs.Secret.from_secrets_manager(
+                        db_instance.secret, "username"),
+                },
+                environment={
+                    "DB_NAME": "obs_db",
+                    "DB_PORT": "5432"
+                }),
             cluster=cluster,
             public_load_balancer=True,
             service_name="ObsServerAPIService"
         )
+
+        db_instance.connections.allow_default_port_from(serv1.service)
 
         with open("../astrobackend/repository.json", "r") as f:
             repository2 = json.load(f).get("repository")
@@ -55,7 +86,7 @@ class ObsEcsStack(cdk.Stack):
                 ecr.Repository.from_repository_arn(
                     scope=self, id="ObsAstroServerRepo",
                     repository_arn=repository2["repositoryArn"])),
-            memory_limit_mib=256,
+            memory_limit_mib=512,
             cpu=256,
         )
         
@@ -68,7 +99,8 @@ class ObsEcsStack(cdk.Stack):
             cluster=cluster,
             task_definition=taskdef2,
             desired_count=1,
-            service_name="ObsAstroServerAPIService"
+            service_name="ObsAstroServerAPIService",
+            enable_execute_command=True,
         )
 
         targetgroup2 = elbv2.ApplicationTargetGroup(
