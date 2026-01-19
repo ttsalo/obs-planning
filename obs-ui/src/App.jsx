@@ -240,6 +240,10 @@ const App = () => {
 			   © Tomi T. Salo 2025
 			   <a href={`http://${window.location.hostname}:8081/apidocs/`}>
 			   Apidoc (astro)</a>
+			   <a href={`http://${window.location.hostname}/health`}>
+			   Backend health</a>
+			   <a href={`http://${window.location.hostname}:8081/health`}>
+			   Astrobackend health</a>
 			   </Space>
 		       </Flex>
 		   </Layout.Footer>

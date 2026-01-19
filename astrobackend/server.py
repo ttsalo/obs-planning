@@ -40,6 +40,11 @@ def index():
     return "<p>Use the API</p>"
 
 
+@app.route("/health")
+def health_check():
+    return {"status": "pass"}, 200
+
+
 # Return just a empty response, the access control headers will get
 # added in the after_request handler
 @app.before_request

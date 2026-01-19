@@ -68,6 +68,14 @@ class ObsEcsStack(cdk.Stack):
             service_name="ObsServerAPIService"
         )
 
+        # serv1.task_definition.default_container.add_health_check(
+        #     command=["CMD-SHELL", "curl -f http://localhost/health || exit 1"],
+        #     interval=Duration.seconds(30),
+        #     timeout=Duration.seconds(5),
+        #     retries=3,
+        #     start_period=Duration.seconds(60)
+        # )
+        
         db_instance.connections.allow_default_port_from(serv1.service)
 
         with open("../astrobackend/repository.json", "r") as f:
@@ -88,6 +96,14 @@ class ObsEcsStack(cdk.Stack):
                     repository_arn=repository2["repositoryArn"])),
             memory_limit_mib=512,
             cpu=256,
+            health_check=ecs.HealthCheck(
+                command=["CMD-SHELL",
+                         "curl -f http://localhost:8000/health || exit 1"],
+                interval=cdk.Duration.seconds(30),
+                timeout=cdk.Duration.seconds(5),
+                retries=3,
+                start_period=cdk.Duration.seconds(60)
+            ),
         )
         
         container2.add_port_mappings(
