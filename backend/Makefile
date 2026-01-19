@@ -20,7 +20,7 @@ runshell:
 	docker run -t -i obs-planner-server bash
 
 create-repository:
-	aws ecr create-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) > repository.json
+	aws ecr describe-repositories --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) 2> /dev/null || (aws ecr create-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) > repository.json)
 
 delete-repository:
 	aws ecr delete-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) --force
