@@ -9,7 +9,7 @@ build:
 check:
 	go test
 
-push:
+aws-push:
 	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 	docker push $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com/obs-planner-repository
 
@@ -19,10 +19,10 @@ runserver: test build
 runshell:
 	docker run -t -i obs-planner-server bash
 
-createrepository:
+create-repository:
 	aws ecr create-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) > repository.json
 
-deleterepository:
+delete-repository:
 	aws ecr delete-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) --force
 
 

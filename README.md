@@ -81,32 +81,29 @@ cd ubs-ui
 npm run build
 ```
 
-# Build backend image (includes UI build)
+# Build backend image for local use (includes UI build)
 `make build`
 
 # Run unit tests (sequentially for UI code, Go server and Python server)
 `make check`
 
-# Run backend image locally
+# Run backend images locally
 `make runserver`
 
 UI will be reachable in http://localhost:8080/
 
-## Push the latest images to AWS
+# Clean up unused images from docker
 
-Run separately in `backend` and `astrobackend`.
+Docker doesn't automatically clean up old images once newer ones have
+been built and tagged, so this needs to be run every once in a while:
+`make docker-cleanup`
 
-```
-make createrepository
-make push
-```
+## Build and push the latest images to AWS
+`make aws-push`
 
 Repositories are billable resources in AWS so they should to be deleted 
-when no longer needed.
-
-```
-make deleterepository
-```
+when no longer needed:
+`make aws-cleanup`
 
 # Set up CDK (one-time setup in the repo)
 ```

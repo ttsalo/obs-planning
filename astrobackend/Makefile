@@ -9,7 +9,7 @@ build: test
 test:
 	true
 
-push:
+aws-push:
 	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 	docker push $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com/obs-planner-astro-repository
 
@@ -19,10 +19,10 @@ runserver: test build
 runshell:
 	docker run -t -i obs-planner-astroserver bash
 
-createrepository:
+create-repository:
 	aws ecr create-repository --repository-name $(AWS_ASTRO_REPOSITORY) --region $(AWS_REGION) > repository.json
 
-deleterepository:
+delete-repository:
 	aws ecr delete-repository --repository-name $(AWS_ASTRO_REPOSITORY) --region $(AWS_REGION) --force
 
 update-reqs:

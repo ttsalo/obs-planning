@@ -13,5 +13,13 @@ check:
 runserver: build
 	docker compose up
 
-cleanup:
+aws-push:
+	make -C backend create-repository build aws-push
+	make -C astrobackend create-repository build aws-push
+
+aws-cleanup:
+	make -C backend delete-repository
+	make -C astrobackend delete-repository
+
+docker-cleanup:
 	docker system prune
