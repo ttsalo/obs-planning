@@ -40,29 +40,45 @@ class ObsEcsStack(cdk.Stack):
             database_name="obs_db",
         )
 
-        # Create first ALB service as usual, but with an explicit cluster
-        # created above.
+        taskdef1 = ecs.FargateTaskDefinition(self, "ObsServerTask")
+        
+        container1 = taskdef1.add_container("ObsAstroServerContainer",
+            image=ecs.ContainerImage.from_ecr_repository(
+                ecr.Repository.from_repository_arn(
+                    scope=self, id="ObsServerRepo",
+                    repository_arn=repository["repositoryArn"])),
+            memory_limit_mib=256,
+            cpu=256,
+            health_check=ecs.HealthCheck(
+                command=["CMD-SHELL",
+                         "curl -f http://localhost/health || exit 1"],
+                interval=cdk.Duration.seconds(30),
+                timeout=cdk.Duration.seconds(5),
+                retries=3,
+                start_period=cdk.Duration.seconds(60)
+            ),
+            secrets={
+                "DB_PASSWORD": ecs.Secret.from_secrets_manager(
+                    db_instance.secret, "password"),
+                "DB_HOST": ecs.Secret.from_secrets_manager(
+                    db_instance.secret, "host"),
+                "DB_USER": ecs.Secret.from_secrets_manager(
+                    db_instance.secret, "username"),
+            },
+            environment={
+                "DB_NAME": "obs_db",
+                "DB_PORT": "5432"
+            })
+        
+        container1.add_port_mappings(
+            ecs.PortMapping(container_port=80, protocol=ecs.Protocol.TCP)
+        )
+        
+        # Create first ALB service,
         serv1 = ecsp.ApplicationLoadBalancedFargateService(
             self, "ObsServerService",
             enable_execute_command=True,
-            task_image_options=ecsp.ApplicationLoadBalancedTaskImageOptions(
-                image=ecs.ContainerImage.from_ecr_repository(
-                    ecr.Repository.from_repository_arn(
-                        scope=self, id="ObsServerRepo",
-                        repository_arn=repository["repositoryArn"])),
-                container_port=80,
-                secrets={
-                    "DB_PASSWORD": ecs.Secret.from_secrets_manager(
-                        db_instance.secret, "password"),
-                    "DB_HOST": ecs.Secret.from_secrets_manager(
-                        db_instance.secret, "host"),
-                    "DB_USER": ecs.Secret.from_secrets_manager(
-                        db_instance.secret, "username"),
-                },
-                environment={
-                    "DB_NAME": "obs_db",
-                    "DB_PORT": "5432"
-                }),
+            task_definition=taskdef1,
             cluster=cluster,
             public_load_balancer=True,
             service_name="ObsServerAPIService"

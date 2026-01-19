@@ -72,9 +72,19 @@ func updateSession(c echo.Context) error {
     return c.JSON(http.StatusOK, cookie_data)
 }
 
+type HealthReply struct {
+    Status string `json:"status"`
+}
+
+func health(c echo.Context) error {
+    r := &HealthReply{Status: "pass"}
+    return c.JSON(http.StatusOK, r)
+}
+
 func main() {
     e := echo.New()
     e.Debug = true
+    e.GET("/health", health)
     e.GET("/get-session", getSession)
     e.POST("/update-session", updateSession)
     e.Static("/", "static")
