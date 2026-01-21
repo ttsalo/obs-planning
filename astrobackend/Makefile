@@ -20,7 +20,7 @@ runshell:
 	docker run -t -i obs-planner-astroserver bash
 
 create-repository:
-	aws ecr describe-repositories --repository-name $(AWS_ASTRO_REPOSITORY) --region $(AWS_REGION) || jq -r .repositories[0] > repository.json
+	aws ecr describe-repositories --repository-name $(AWS_ASTRO_REPOSITORY) --region $(AWS_REGION) | jq -r .repositories[0] > repository.json || true
 	[ -s repository.json ] || (aws ecr create-repository --repository-name $(AWS_ASTRO_REPOSITORY) --region $(AWS_REGION) | jq -r .repository > repository.json)
 
 delete-repository:
