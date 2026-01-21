@@ -135,9 +135,11 @@ func main() {
 //    ctx := context.Background()
 
     // Migrate the schema
-    DB.AutoMigrate(&User{})
-    DB.AutoMigrate(&TargetSearch{})
-    DB.AutoMigrate(&TargetObject{})
+    if db_err == nil {
+	DB.AutoMigrate(&User{})
+	DB.AutoMigrate(&TargetSearch{})
+	DB.AutoMigrate(&TargetObject{})
+    }
 	
     e.GET("/health", health)
     e.GET("/get-session", getSession)
