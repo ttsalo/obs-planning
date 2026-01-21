@@ -58,16 +58,16 @@ class ObsEcsStack(cdk.Stack):
                 start_period=cdk.Duration.seconds(60)
             ),
             secrets={
-                "DB_PASSWORD": ecs.Secret.from_secrets_manager(
+                "OBS_DB_PASSWORD": ecs.Secret.from_secrets_manager(
                     db_instance.secret, "password"),
-                "DB_HOST": ecs.Secret.from_secrets_manager(
+                "OBS_DB_HOST": ecs.Secret.from_secrets_manager(
                     db_instance.secret, "host"),
-                "DB_USER": ecs.Secret.from_secrets_manager(
+                "OBS_DB_USER": ecs.Secret.from_secrets_manager(
                     db_instance.secret, "username"),
             },
             environment={
-                "DB_NAME": "obs_db",
-                "DB_PORT": "5432"
+                "OBS_DB_NAME": "obs_db",
+                "OBS_DB_PORT": "5432"
             })
         
         container1.add_port_mappings(

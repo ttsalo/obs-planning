@@ -1,4 +1,4 @@
-FROM public.ecr.aws/amazonlinux/amazonlinux:latest
+FROM public.ecr.aws/docker/library/rockylinux:9
 
 # Update installed packages and install Go
 RUN yum update -y && yum install -y golang iputils

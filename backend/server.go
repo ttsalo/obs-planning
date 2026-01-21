@@ -3,10 +3,16 @@ package main
 import (
     "encoding/json"
     "encoding/base64"
-//    "fmt"
+    "fmt"
     "net/http"
+    "os"
     "github.com/labstack/echo/v4"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
 )
+
+var DB *gorm.DB
+var db_err error
 
 type Session struct {
     LAT float64 `json:"lat"`
@@ -74,19 +80,73 @@ func updateSession(c echo.Context) error {
 
 type HealthReply struct {
     Status string `json:"status"`
+    Error string `json:"error"`
 }
 
 func health(c echo.Context) error {
-    r := &HealthReply{Status: "pass"}
+    var r *HealthReply
+    if db_err != nil {
+	r = &HealthReply{
+	    Status: "fail",
+	    Error: fmt.Sprintf("%v", db_err)}
+    } else {
+	r = &HealthReply{Status: "pass"}
+    }
     return c.JSON(http.StatusOK, r)
+}
+
+type User struct {
+    gorm.Model
+    Username  string
+    Password uint
+    Active bool
+}
+
+type TargetSearch struct {
+    gorm.Model
+    Name string
+    UserID int
+    User User
+    TargetObjects []TargetObject `gorm:"many2many:search_results;"`
+}
+
+type TargetObject struct {
+    gorm.Model
+    Name string
+    RA float64
+    Dec float64
+    TargetSearches []TargetSearch `gorm:"many2many:search_results;"`
 }
 
 func main() {
     e := echo.New()
     e.Debug = true
+
+    dsn := fmt.Sprintf("host=%v user=%v password=%v dbname=%v port=%v",
+	os.Getenv("OBS_DB_HOST"), os.Getenv("OBS_DB_USER"),
+	os.Getenv("OBS_DB_PASSWORD"), os.Getenv("OBS_DB_NAME"),
+	os.Getenv("OBS_DB_PORT"))
+    DB, db_err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    
+    //if err != nil {
+    //	panic(fmt.Errorf("Failed to connect to database: %w", err))
+    // }
+
+//    ctx := context.Background()
+
+    // Migrate the schema
+    DB.AutoMigrate(&User{})
+    DB.AutoMigrate(&TargetSearch{})
+    DB.AutoMigrate(&TargetObject{})
+	
     e.GET("/health", health)
     e.GET("/get-session", getSession)
     e.POST("/update-session", updateSession)
     e.Static("/", "static")
-    e.Logger.Fatal(e.Start(":80"))
+    envp := os.Getenv("OBS_SERVER_PORT")
+    if envp != "" {
+	e.Logger.Fatal(e.Start(":" + envp))
+    } else {
+	e.Logger.Fatal(e.Start(":80"))
+    }
 }
