@@ -1,6 +1,6 @@
 include ../defines.mk
 
-AWS_REPOSITORY_URI=`jq -r .repository.repositoryUri repository.json`
+AWS_REPOSITORY_URI=`jq -r .repositoryUri repository.json`
 
 build:
 	docker build -t obs-planner-server .
@@ -20,7 +20,8 @@ runshell:
 	docker run -t -i obs-planner-server bash
 
 create-repository:
-	aws ecr describe-repositories --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) 2> /dev/null || (aws ecr create-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) > repository.json)
+	aws ecr describe-repositories --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) || jq -r .repositories[0] > repository.json
+	[ -s repository.json ] || (aws ecr create-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) | jq -r .repository > repository.json)
 
 delete-repository:
 	aws ecr delete-repository --repository-name $(AWS_REPOSITORY) --region $(AWS_REGION) --force

@@ -17,7 +17,7 @@ class ObsEcsStack(cdk.Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         with open("../backend/repository.json", "r") as f:
-            repository = json.load(f).get("repository")
+            repository = json.load(f)
 
         print(f"Using server repo: {repository}")
 
@@ -87,7 +87,7 @@ class ObsEcsStack(cdk.Stack):
         db_instance.connections.allow_default_port_from(serv1.service)
 
         with open("../astrobackend/repository.json", "r") as f:
-            repository2 = json.load(f).get("repository")
+            repository2 = json.load(f)
 
         print(f"Using astro server repo: {repository2}")
 
