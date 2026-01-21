@@ -105,6 +105,20 @@ Repositories are billable resources in AWS so they should to be deleted
 when no longer needed:
 `make aws-cleanup`
 
+## Local postgres setup (optional)
+
+The backend server can be run directly, outside docker, in this case a
+postgres instance is required and needs to be configured with
+environment variables:
+
+```
+export OBS_DB_HOST=<hostname>
+export OBS_DB_USER=<db-username>
+export OBS_DB_PASSWORD=<db-password>
+export OBS_DB_NAME="obs_db"
+export OBS_DB_PORT=5432
+```
+
 ## Set up CDK (one-time setup in the repo)
 ```
 mkdir obs-ecs
