@@ -40,14 +40,15 @@ class ObsEcsStack(cdk.Stack):
             database_name="obs_db",
         )
 
-        taskdef1 = ecs.FargateTaskDefinition(self, "ObsServerTask")
+        taskdef1 = ecs.FargateTaskDefinition(self, "ObsServerTask",
+                                             memory_limit_mib=2048)
         
-        container1 = taskdef1.add_container("ObsAstroServerContainer",
+        container1 = taskdef1.add_container("ObsServerContainer",
             image=ecs.ContainerImage.from_ecr_repository(
                 ecr.Repository.from_repository_arn(
                     scope=self, id="ObsServerRepo",
                     repository_arn=repository["repositoryArn"])),
-            memory_limit_mib=256,
+            memory_limit_mib=1024,
             cpu=256,
             health_check=ecs.HealthCheck(
                 command=["CMD-SHELL",
@@ -96,13 +97,14 @@ class ObsEcsStack(cdk.Stack):
         # the two services are available in different ports of the same
         # public IP.
         alb = serv1.load_balancer
-        taskdef2 = ecs.FargateTaskDefinition(self, "ObsAstroServerTask")
+        taskdef2 = ecs.FargateTaskDefinition(self, "ObsAstroServerTask",
+                                             memory_limit_mib=2048)
         container2 = taskdef2.add_container("ObsAstroServerContainer",
             image=ecs.ContainerImage.from_ecr_repository(
                 ecr.Repository.from_repository_arn(
                     scope=self, id="ObsAstroServerRepo",
                     repository_arn=repository2["repositoryArn"])),
-            memory_limit_mib=512,
+            memory_limit_mib=1024,
             cpu=256,
             health_check=ecs.HealthCheck(
                 command=["CMD-SHELL",
