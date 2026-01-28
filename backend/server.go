@@ -1,17 +1,18 @@
 package main
 
 import (
+    "context"
     "encoding/json"
     "encoding/base64"
     "fmt"
     "net/http"
     "os"
+    "time"
     "github.com/labstack/echo/v4"
     "gorm.io/driver/postgres"
     "gorm.io/gorm"
 )
 
-var DB *gorm.DB
 var db_err error
 
 type Session struct {
@@ -98,7 +99,7 @@ func health(c echo.Context) error {
 type User struct {
     gorm.Model
     Username  string
-    Password uint
+    Password string
     Active bool
 }
 
@@ -118,37 +119,87 @@ type TargetObject struct {
     TargetSearches []TargetSearch `gorm:"many2many:search_results;"`
 }
 
-func main() {
-    e := echo.New()
-    e.Debug = true
-
+func initDB(db_chan chan<- *gorm.DB) {
+    var DB *gorm.DB
+    
     dsn := fmt.Sprintf("host=%v user=%v password=%v dbname=%v port=%v",
 	os.Getenv("OBS_DB_HOST"), os.Getenv("OBS_DB_USER"),
 	os.Getenv("OBS_DB_PASSWORD"), os.Getenv("OBS_DB_NAME"),
 	os.Getenv("OBS_DB_PORT"))
     DB, db_err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
     
-    //if err != nil {
-    //	panic(fmt.Errorf("Failed to connect to database: %w", err))
-    // }
-
-//    ctx := context.Background()
-
-    // Migrate the schema
     if db_err == nil {
 	DB.AutoMigrate(&User{})
 	DB.AutoMigrate(&TargetSearch{})
 	DB.AutoMigrate(&TargetObject{})
+	db_chan <- DB
+    } else {
+	db_chan <- nil
     }
-	
+}
+
+func registerDBEndpoints(e *echo.Echo, DB *gorm.DB) {
+    e.Logger.Info("Registering DB endpoints")
+    
+    ctx := context.Background()
+
+    user, err := gorm.G[User](DB).Where("username = ?", "testuser").First(ctx)
+
+    if err == nil {
+	e.Logger.Info("Testuser: ", user)
+    } else {
+	testuser := User{Username: "testuser", Password: "password",
+	    Active: true}
+	err := gorm.G[User](DB).Create(ctx, &testuser)
+	if err != nil {
+	    e.Logger.Error("Failed to create testuser: ", err.Error())
+	} else {
+	    e.Logger.Info("Created testuser: ", testuser)
+	}
+    }
+}
+
+func main() {
+    var DB *gorm.DB
+    
+    e := echo.New()
+    e.Debug = true
+
     e.GET("/health", health)
     e.GET("/get-session", getSession)
     e.POST("/update-session", updateSession)
     e.Static("/", "static")
+    
     envp := os.Getenv("OBS_SERVER_PORT")
-    if envp != "" {
-	e.Logger.Fatal(e.Start(":" + envp))
-    } else {
-	e.Logger.Fatal(e.Start(":80"))
+
+    // Run echo server in a separate goroutine so that we can perform
+    // other actions in the main thread
+    go func() {
+	if envp != "" {
+	    e.Logger.Fatal(e.Start(":" + envp))
+	} else {
+	    e.Logger.Fatal(e.Start(":80"))
+	}
+    }()
+
+    // Connect to database in a separate goroutine so that delay (or
+    // failure) in connecting to db doesn't prevent non-db endpoints
+    // from going up (/health for example)
+    db_chan := make(chan *gorm.DB)
+    go initDB(db_chan)
+
+    ticker := time.NewTicker(60 * time.Second)
+
+    for {
+	select {
+	case t := <-ticker.C:
+	    e.Logger.Info("Tick ", t)
+	case DB = <-db_chan:
+	    if DB != nil {
+		registerDBEndpoints(e, DB)
+	    } else {
+		e.Logger.Error("Failed to connect to DB ", db_err)
+	    }
+	}
     }
 }
