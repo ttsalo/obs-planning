@@ -1,7 +1,6 @@
 package main
 
 import (
-    "context"
     "encoding/json"
     "encoding/base64"
     "fmt"
@@ -9,11 +8,10 @@ import (
     "os"
     "time"
     "github.com/labstack/echo/v4"
-    "gorm.io/driver/postgres"
     "gorm.io/gorm"
 )
 
-var db_err error
+var DB_err error
 
 type Session struct {
     LAT float64 `json:"lat"`
@@ -86,77 +84,14 @@ type HealthReply struct {
 
 func health(c echo.Context) error {
     var r *HealthReply
-    if db_err != nil {
+    if DB_err != nil {
 	r = &HealthReply{
 	    Status: "fail",
-	    Error: fmt.Sprintf("%v", db_err)}
+	    Error: fmt.Sprintf("%v", DB_err)}
     } else {
 	r = &HealthReply{Status: "pass"}
     }
     return c.JSON(http.StatusOK, r)
-}
-
-type User struct {
-    gorm.Model
-    Username  string
-    Password string
-    Active bool
-}
-
-type TargetSearch struct {
-    gorm.Model
-    Name string
-    UserID int
-    User User
-    TargetObjects []TargetObject `gorm:"many2many:search_results;"`
-}
-
-type TargetObject struct {
-    gorm.Model
-    Name string
-    RA float64
-    Dec float64
-    TargetSearches []TargetSearch `gorm:"many2many:search_results;"`
-}
-
-func initDB(db_chan chan<- *gorm.DB) {
-    var DB *gorm.DB
-    
-    dsn := fmt.Sprintf("host=%v user=%v password=%v dbname=%v port=%v",
-	os.Getenv("OBS_DB_HOST"), os.Getenv("OBS_DB_USER"),
-	os.Getenv("OBS_DB_PASSWORD"), os.Getenv("OBS_DB_NAME"),
-	os.Getenv("OBS_DB_PORT"))
-    DB, db_err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
-    
-    if db_err == nil {
-	DB.AutoMigrate(&User{})
-	DB.AutoMigrate(&TargetSearch{})
-	DB.AutoMigrate(&TargetObject{})
-	db_chan <- DB
-    } else {
-	db_chan <- nil
-    }
-}
-
-func registerDBEndpoints(e *echo.Echo, DB *gorm.DB) {
-    e.Logger.Info("Registering DB endpoints")
-    
-    ctx := context.Background()
-
-    user, err := gorm.G[User](DB).Where("username = ?", "testuser").First(ctx)
-
-    if err == nil {
-	e.Logger.Info("Testuser: ", user)
-    } else {
-	testuser := User{Username: "testuser", Password: "password",
-	    Active: true}
-	err := gorm.G[User](DB).Create(ctx, &testuser)
-	if err != nil {
-	    e.Logger.Error("Failed to create testuser: ", err.Error())
-	} else {
-	    e.Logger.Info("Created testuser: ", testuser)
-	}
-    }
 }
 
 func main() {
@@ -186,7 +121,7 @@ func main() {
     // failure) in connecting to db doesn't prevent non-db endpoints
     // from going up (/health for example)
     db_chan := make(chan *gorm.DB)
-    go initDB(db_chan)
+    go ConnectDB(db_chan)
 
     ticker := time.NewTicker(60 * time.Second)
 
@@ -196,9 +131,9 @@ func main() {
 	    e.Logger.Info("Tick ", t)
 	case DB = <-db_chan:
 	    if DB != nil {
-		registerDBEndpoints(e, DB)
+		RegisterDBEndpoints(e, DB)
 	    } else {
-		e.Logger.Error("Failed to connect to DB ", db_err)
+		e.Logger.Error("Failed to connect to DB: ", DB_err)
 	    }
 	}
     }

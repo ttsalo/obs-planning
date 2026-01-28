@@ -7,7 +7,7 @@ build:
 	docker tag obs-planner-server $(AWS_REPOSITORY_URI)
 
 check:
-	go test
+	go test -v
 
 aws-push:
 	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
