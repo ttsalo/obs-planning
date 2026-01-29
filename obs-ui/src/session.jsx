@@ -22,10 +22,10 @@ export const SessionContext = createContext();
 export function updateSession(session, setSession, updated) {
     const updateData = async () => {
 	try {
-	    const response = await axios.post('/update-session', updated);
+	    const response = await axios.post('/api/update-session', updated);
 	    setSession(response.data);
 	} catch (error) {
-	    console.error("/update-session fetch failed:", error); 
+	    console.error("/api/update-session fetch failed:", error); 
 	}
     };
     

@@ -54,7 +54,7 @@ func testLogin(t *testing.T, body string, status int) {
 
 func TestLoginFail(t *testing.T) {
     testLogin(t, `{"username":"testuser","password":"foobar"}`,
-	http.StatusForbidden)
+	http.StatusUnauthorized)
 }
 
 func TestLoginSuccess(t *testing.T) {

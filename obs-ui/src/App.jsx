@@ -13,10 +13,10 @@ const App = () => {
     useEffect(() => {
 	const fetchData = async () => {
 	    try {
-		const response = await axios.get('/get-session'); 
+		const response = await axios.get('/api/get-session'); 
 		setSession(response.data);
 	    } catch (error) {
-		console.error("/get-session fetch failed:", error); 
+		console.error("/api/get-session fetch failed:", error); 
 	    }
 	};
 	if (session == null)

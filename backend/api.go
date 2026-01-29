@@ -3,6 +3,7 @@ package main
 import (
     "context"
     "net/http"
+    "github.com/golang-jwt/jwt/v5"
     "github.com/labstack/echo/v4"
     "gorm.io/gorm"
 )
@@ -13,7 +14,7 @@ type Handler struct {
 
 // Register API endpoints that require a database. This is separate
 // so that we can get the basic endpoints up even without a database.
-func RegisterDBEndpoints(e *echo.Echo, DB *gorm.DB) error {
+func RegisterDBEndpoints(e *echo.Echo, r *echo.Group, DB *gorm.DB) error {
     err := InitDB(e, DB)
     if err != nil {
 	return err
@@ -40,9 +41,19 @@ func (h *Handler) login(c echo.Context) error {
 	login_data.Username, login_data.Password).First(ctx)
 
     if err != nil {
-	return c.JSON(http.StatusForbidden, "Invalid login credentials")
+	return c.JSON(http.StatusUnauthorized, "Invalid login credentials")
     } else {
-	return c.JSON(http.StatusOK, user)
+	claims := jwt.MapClaims{"username": user.Username}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Generate encoded token and send it as response.
+	t, err := token.SignedString([]byte("secret"))
+	if err != nil {
+	    return c.JSON(http.StatusInternalServerError,
+		"Failed to generate JWT token")
+	} else {
+	    return c.JSON(http.StatusOK, map[string]any{"token": t})
+	}
     }
 }
 

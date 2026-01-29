@@ -8,10 +8,9 @@ import (
     "os"
     "time"
     "github.com/labstack/echo/v4"
+    "github.com/labstack/echo-jwt/v4"
     "gorm.io/gorm"
 )
-
-var DB_err error
 
 type Session struct {
     LAT float64 `json:"lat"`
@@ -99,11 +98,16 @@ func main() {
     
     e := echo.New()
     e.Debug = true
-
+    
     e.GET("/health", health)
-    e.GET("/get-session", getSession)
-    e.POST("/update-session", updateSession)
     e.Static("/", "static")
+
+    // Everything under /api required authentication, 
+    r := e.Group("/api")
+    r.Use(echojwt.JWT([]byte("secret")))
+    
+    r.GET("/get-session", getSession)
+    r.POST("/update-session", updateSession)
     
     envp := os.Getenv("OBS_SERVER_PORT")
 
@@ -131,7 +135,7 @@ func main() {
 	    e.Logger.Info("Tick ", t)
 	case DB = <-db_chan:
 	    if DB != nil {
-		RegisterDBEndpoints(e, DB)
+		RegisterDBEndpoints(e, r, DB)
 	    } else {
 		e.Logger.Error("Failed to connect to DB: ", DB_err)
 	    }
