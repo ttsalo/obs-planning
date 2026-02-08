@@ -21,8 +21,11 @@ func RegisterDBEndpoints(e *echo.Echo, r *echo.Group, DB *gorm.DB) error {
     }
 
     h := Handler{DB: DB}
-	
+
     e.POST("/login", h.login)
+
+    pos_group := r.Group("/positions")
+    pos_group.GET("/", h.positions)
 
     return nil
 }
@@ -57,3 +60,15 @@ func (h *Handler) login(c echo.Context) error {
     }
 }
 
+func (h *Handler) positions(c echo.Context) error {
+    ctx := context.Background()
+    //params := c.QueryParams()
+    baseQ := gorm.G[Position](h.DB)
+    //positions, err := gorm.G[Position](h.DB).Where(&params).Find(ctx)
+    positions, err := baseQ.Find(ctx)
+    if err != nil {
+	return c.JSON(http.StatusInternalServerError, err.Error())
+    } else {
+	return c.JSON(http.StatusOK, positions)
+    }
+}

@@ -7,45 +7,69 @@ import (
     "net/http"
     "os"
     "time"
+    "github.com/golang-jwt/jwt/v5"
     "github.com/labstack/echo/v4"
     "github.com/labstack/echo-jwt/v4"
     "gorm.io/gorm"
 )
 
 type Session struct {
-    LAT float64 `json:"lat"`
-    LON float64 `json:"lon"`
-    TARGET string `json:"target"`
+    Username string `json:"username"`
+    Position string `json:"position"`
+}
+
+// Get the username from JWT. No error checking as this should be called
+// from endpoints with authentication and we can rely on having a valid
+// token contents.
+func UsernameFromJWT(c echo.Context) string {
+    token, _ := c.Get("user").(*jwt.Token)
+    claims, _ := token.Claims.(jwt.MapClaims)
+    return claims["username"].(string)
+}
+
+// Create a fresh session cookie if required.
+func makeNewSessionCookie(username string) (map[string]any, *http.Cookie) {
+    new_cookie := new(http.Cookie)
+    new_cookie.Name = "obs-session"
+    cookie_data := make(map[string]any)
+    cookie_data["username"] = username
+    cookie_data["position"] = ""
+    b, _ := json.Marshal(cookie_data)
+    new_cookie.Value = base64.URLEncoding.EncodeToString(b)
+    return cookie_data, new_cookie
 }
 
 /* Decode the session cookie and return the contents to the frontend,
 or create a new cookie. The cookie is opaque to the frontend, so
-this is how the frontend accesses the contents. */
+this is how the frontend accesses the contents. If the username doesn't
+match, a fresh cookie is created. */
 func getSession(c echo.Context) error {
+    username := UsernameFromJWT(c)
     cookie, err := c.Cookie("obs-session")
+    
     if err != nil || cookie.Valid() != nil {
-	new_cookie := new(http.Cookie)
-	new_cookie.Name = "obs-session"
-	cookie_data := make(map[string]any)
-	cookie_data["lat"] = 0.0
-	cookie_data["lon"] = 0.0
-	b, _ := json.Marshal(cookie_data)
-	new_cookie.Value = base64.URLEncoding.EncodeToString(b)
+	cookie_data, new_cookie := makeNewSessionCookie(username)
 	c.SetCookie(new_cookie)
 	return c.JSON(http.StatusOK, cookie_data)
     }
 
     b, err := base64.URLEncoding.DecodeString(cookie.Value)
     if err != nil {
-	return c.JSON(http.StatusBadRequest, "Failed to decode Base64")
+	return c.JSON(http.StatusInternalServerError, "Failed to decode Base64")
     }
 
     var cookie_data map[string]any
     if err := json.Unmarshal(b, &cookie_data); err != nil {
-	return c.JSON(http.StatusBadRequest, "Failed to unmarshal JSON")
+	return c.JSON(http.StatusInternalServerError, "Failed to unmarshal JSON")
     }
 
-    return c.JSON(http.StatusOK, cookie_data)
+    if cookie_data["username"] != username {
+	cookie_data, new_cookie := makeNewSessionCookie(username)
+	c.SetCookie(new_cookie)
+	return c.JSON(http.StatusOK, cookie_data)
+    } else {
+	return c.JSON(http.StatusOK, cookie_data)
+    }
 }
 
 func updateSession(c echo.Context) error {
@@ -66,9 +90,8 @@ func updateSession(c echo.Context) error {
 
     var updated_data Session
     c.Bind(&updated_data)
-    cookie_data["lat"] = updated_data.LAT
-    cookie_data["lon"] = updated_data.LON
-    cookie_data["target"] = updated_data.TARGET
+    cookie_data["username"] = updated_data.Username
+    cookie_data["position"] = updated_data.Position
 
     b, _ = json.Marshal(cookie_data)
     cookie.Value = base64.URLEncoding.EncodeToString(b)

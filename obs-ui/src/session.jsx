@@ -8,16 +8,16 @@ import axios from 'axios';
    persistently in the server.
 
    Session properties:
-   lat: <Number> User latitude
-   lon: <Number> User longitude
+   username: <String> Login username, used to query user-specific
+     persistent data from the database.
+   position: <String> Currently selected observation position.
 */
 export const SessionContext = createContext();
 
 /* Update one or more items in the session. We'll pass the updated
    values to the server, which will update the cookie and return the
    session data with updated values back, which are then set to the
-   client side session here. This allows server to validate the data
-   and optionally write it to a more persistent storage than the cookie.
+   client side session here. 
  */
 export function updateSession(session, setSession, updated) {
     const updateData = async () => {
