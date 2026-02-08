@@ -18,8 +18,14 @@ var (
     err = MigrateDB(sqlite_db)
     e = echo.New()
     _ = InitDB(e, sqlite_db)
-    h = Handler{DB: sqlite_db}
+    u = "testuser"
+    h = Handler{DB: sqlite_db,
+	UsernameFromJWT: testUsernameFromJWT}
 )
+
+func testUsernameFromJWT(c echo.Context) string {
+    return u
+}
 
 var healthPassJSON = `{"status":"pass","error":""}`
 

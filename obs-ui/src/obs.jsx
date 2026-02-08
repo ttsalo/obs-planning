@@ -8,8 +8,6 @@ import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
 	 Tag } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 
-const obs_api = axios.create({timeout: 120 * 1000});
-
 // Component to plot the current position of the given target in the sky,
 // seen from the geographic location in the settings.
 function Target({target, fill="white"}) {
@@ -21,10 +19,11 @@ function Target({target, fill="white"}) {
     const { isPending, error, data } = useQuery({
 	queryKey: ['targetData', target],
 	queryFn: async () => {
-	    const resp = await obs_api.post(
+	    const resp = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj`,
 		{target: target, lat: session.lat,
-		 lon: session.lon, time: new Date()});
+		 lon: session.lon, time: new Date()},
+		{timeout: 120 * 1000});
 	    return resp.data;
 	},
 	refetchInterval: 60 * 1000
@@ -88,10 +87,11 @@ function TargetPath({target}) {
     const { isPending, error, data } = useQuery({
 	queryKey: ['targetPathData', target],
 	queryFn: async () => {
-	    const resp = await obs_api.post(
+	    const resp = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj-timeseries`,
 		{target: target, lat: session.lat,
-		 lon: session.lon, time: new Date(), timespan: "day"});
+		 lon: session.lon, time: new Date(), timespan: "day"},
+	    	{timeout: 120 * 1000});
 	    return resp.data;
 	},
 	refetchInterval: 30 * 60 * 1000
@@ -312,6 +312,21 @@ const ObsStage = () => {
 	console.log("session null, skip rendering contents");
 	return null;
     }
+
+    const { isPending, error, data } = useQuery({
+	queryKey: ["positions"],
+	queryFn: async () => {
+	    const response = await axios.get('/api/positions');
+	    return response.data;
+	    },
+	})
+    if (isPending) {
+	return null;
+    };
+    if (error) {
+	console.log(`Failed to load positions: ${error}`);
+	return null;
+    };
        
     return (<Layer>
 		<CoordGrid>

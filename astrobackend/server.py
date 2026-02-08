@@ -61,7 +61,7 @@ def get_options():
 def add_access_control_headers(resp):
     resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin")
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     return resp
 
 

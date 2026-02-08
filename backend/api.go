@@ -10,22 +10,22 @@ import (
 
 type Handler struct {
     DB *gorm.DB
+    UsernameFromJWT func (echo.Context) string
 }
 
 // Register API endpoints that require a database. This is separate
 // so that we can get the basic endpoints up even without a database.
+// r is the restricted (API) part of the url namespace.
 func RegisterDBEndpoints(e *echo.Echo, r *echo.Group, DB *gorm.DB) error {
     err := InitDB(e, DB)
     if err != nil {
 	return err
     }
 
-    h := Handler{DB: DB}
+    h := Handler{DB: DB, UsernameFromJWT: UsernameFromJWT}
 
     e.POST("/login", h.login)
-
-    pos_group := r.Group("/positions")
-    pos_group.GET("/", h.positions)
+    r.GET("/positions", h.positions)
 
     return nil
 }
@@ -35,6 +35,10 @@ type LoginData struct {
     Password string `json:"password"`
 }
 
+// Login, basic username and password, returns {"token": <JWT>} if
+// successful. JWT claims is just the username. Other endpoints do a
+// super simple permission checking by getting the username from the
+// JWT and filtering DB objects using it.
 func (h *Handler) login(c echo.Context) error {
     var login_data LoginData
     c.Bind(&login_data)
@@ -60,12 +64,18 @@ func (h *Handler) login(c echo.Context) error {
     }
 }
 
+// Return stored positions for the current user. Expected number per user
+// is so small that filtering can be done on the client side.
 func (h *Handler) positions(c echo.Context) error {
     ctx := context.Background()
-    //params := c.QueryParams()
-    baseQ := gorm.G[Position](h.DB)
-    //positions, err := gorm.G[Position](h.DB).Where(&params).Find(ctx)
-    positions, err := baseQ.Find(ctx)
+    username := h.UsernameFromJWT(c)
+    db_user, err := gorm.G[User](h.DB).Where(
+	"username = ?", username).First(ctx)
+    if err != nil {
+	return c.JSON(http.StatusInternalServerError, err.Error())
+    }
+    positions, err := gorm.G[Position](h.DB).Where(
+	"user_id = ?", db_user.ID).Find(ctx)
     if err != nil {
 	return c.JSON(http.StatusInternalServerError, err.Error())
     } else {

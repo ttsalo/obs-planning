@@ -33,7 +33,7 @@ func makeNewSessionCookie(username string) (map[string]any, *http.Cookie) {
     new_cookie.Name = "obs-session"
     cookie_data := make(map[string]any)
     cookie_data["username"] = username
-    cookie_data["position"] = ""
+    cookie_data["position"] = "Helsinki"
     b, _ := json.Marshal(cookie_data)
     new_cookie.Value = base64.URLEncoding.EncodeToString(b)
     return cookie_data, new_cookie
@@ -63,7 +63,7 @@ func getSession(c echo.Context) error {
 	return c.JSON(http.StatusInternalServerError, "Failed to unmarshal JSON")
     }
 
-    if cookie_data["username"] != username {
+    if cookie_data["username"] != username || cookie_data["position"] == "" {
 	cookie_data, new_cookie := makeNewSessionCookie(username)
 	c.SetCookie(new_cookie)
 	return c.JSON(http.StatusOK, cookie_data)
