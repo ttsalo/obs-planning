@@ -64,7 +64,7 @@ be automatically updated once per minute.
 - Install vite: `npm install -D vite`
 - Choose database password: `export OBS_DB_PASSWORD=<db-password>`
 
-## Set up venv in astrobackend
+## Set up venv in astrobackend (required for running unit tests)
 
 ```
 cd astrobackend
@@ -98,11 +98,15 @@ npm run build
 
 ## Build backend and astrobackend images for local use (includes UI build)
 `make build`
+Running the images does this automatically, this can be used if you want
+to build the images without running them.
 
 ## Run unit tests (sequentially for UI code, Go server and Python server)
 `make check`
+This is done locally for all three. Could also be done with docker if
+the host OS has problems running the application code locally.
 
-## Run backend images locally
+## Run backend images using docker compose
 `make runserver`
 
 Local development cycle is intended to be: Modify code (whether
