@@ -53,12 +53,16 @@ be automatically updated once per minute.
 - Running locally with docker compose
 - Easy deployment to AWS ECS
 
-# Setup
+# Setup (docker as root, others as user)
 - Install AWS CLI and set up SSO
 - Install AWS CDK
 - Install docker
 - Install golang
+- Install npm
+- Install nvm
 - Install node.js: `nvm install 22`
+- Install vite: `npm install -D vite`
+- Choose database password: `export OBS_DB_PASSWORD=<db-password>`
 
 ## Set up venv in astrobackend
 
@@ -69,25 +73,40 @@ source .astrovenv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Set up React (one-time setup in the repo)
+## Set up Vite + React (one-time setup after repo create, just for documentation here)
 ```
-cd backend
 npm create vite@latest
 ```
+For create:
+- Project name: obs-ui
+- Select a framework: React
+- Select a variant: JavaScript
+- Use rolldown-vite (Experimental)?: No
+- Install with npm and start now?: Yes
 
-## Build UI code
+## Install JS dependencies (one-time setup after repo clone)
 ```
-cd ubs-ui
+cd obs-ui
+npm install
+```
+
+## Build UI code (locally, optional)
+```
+cd obs-ui
 npm run build
 ```
 
-## Build backend image for local use (includes UI build)
+## Build backend and astrobackend images for local use (includes UI build)
 `make build`
 
 ## Run unit tests (sequentially for UI code, Go server and Python server)
 `make check`
 
 ## Run backend images locally
+`make runserver`
+
+Local development cycle is intended to be: Modify code (whether
+JS or either server), Ctrl-C previous `make runserver`, re-run
 `make runserver`
 
 UI will be reachable in http://localhost:8080/
@@ -101,23 +120,14 @@ been built and tagged, so this needs to be run every once in a while:
 ## Build and push the latest images to AWS
 `make aws-push`
 
+The built images are essentially the same as what `make runserver` 
+builds and runs, but this target includes repo creation, image tagging
+and pushing to AWS ECR. After this they can be run in AWS using the
+following CDK steps.
+
 Repositories are billable resources in AWS so they should to be deleted 
 when no longer needed:
 `make aws-cleanup`
-
-## Local postgres setup (optional)
-
-The backend server can be run directly, outside docker, in this case a
-postgres instance is required and needs to be configured with
-environment variables:
-
-```
-export OBS_DB_HOST=<hostname>
-export OBS_DB_USER=<db-username>
-export OBS_DB_PASSWORD=<db-password>
-export OBS_DB_NAME="obs_db"
-export OBS_DB_PORT=5432
-```
 
 ## Set up CDK (one-time setup in the repo)
 ```
@@ -152,3 +162,18 @@ cdk synth
 cdk deploy
 cdk destroy
 ```
+
+## Local postgres setup (optional)
+
+The backend server can be run directly, outside docker, in this case a
+postgres instance is required and needs to be configured with
+environment variables:
+
+```
+export OBS_DB_HOST=<hostname>
+export OBS_DB_USER=<db-username>
+export OBS_DB_PASSWORD=<db-password>
+export OBS_DB_NAME="obs_db"
+export OBS_DB_PORT=5432
+```
+
