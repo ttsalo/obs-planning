@@ -112,7 +112,7 @@ def get_obj():
          "jupiter": 69911.0,
          "saturn": 58232.0,
          "uranus": 25362.0,
-         "neptunus": 24622.0,
+         "neptune": 24622.0,
          "sun": 696340.0}[data["target"].lower()]
         / obj.distance.km) * 180 / math.pi
     return jsonify(get_obj_result_schema.dump({"alt": aa.alt.deg,

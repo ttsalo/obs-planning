@@ -10,7 +10,7 @@ import { SessionContext, StageContext } from './session.jsx'
 
 // Component to plot the current position of the given target in the sky,
 // seen from the geographic location in the settings.
-function Target({target, fill="white"}) {
+function Target({target, pos, fill="white"}) {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
 
@@ -21,8 +21,8 @@ function Target({target, fill="white"}) {
 	queryFn: async () => {
 	    const resp = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj`,
-		{target: target, lat: session.lat,
-		 lon: session.lon, time: new Date()},
+		{target: target, lat: pos.lat,
+		 lon: pos.lon, time: new Date()},
 		{timeout: 120 * 1000});
 	    return resp.data;
 	},
@@ -37,7 +37,7 @@ function Target({target, fill="white"}) {
     const props = {x: stageSize.get("azToPx")(data.az),
 		   y: stageSize.get("altToPx")(data.alt),
 		   radius: data.radius * stageSize.get("zoom")
-		   * (target == "sun" || target == "moon" ?
+		   * (target == "Sun" || target == "Moon" ?
 		      stageSize.get("moonzoom") :
 		      stageSize.get("planetzoom"))}
     
@@ -48,7 +48,7 @@ function Target({target, fill="white"}) {
 
 // Component to plot the future path of a given target in the sky,
 // seen from the geographic location in the settings.
-function TargetPath({target}) {
+function TargetPath({target, pos}) {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
 
@@ -89,8 +89,8 @@ function TargetPath({target}) {
 	queryFn: async () => {
 	    const resp = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj-timeseries`,
-		{target: target, lat: session.lat,
-		 lon: session.lon, time: new Date(), timespan: "day"},
+		{target: target, lat: pos.lat,
+		 lon: pos.lon, time: new Date(), timespan: "day"},
 	    	{timeout: 120 * 1000});
 	    return resp.data;
 	},
@@ -313,31 +313,53 @@ const ObsStage = () => {
 	return null;
     }
 
-    const { isPending, error, data } = useQuery({
+    const posQ = useQuery({
 	queryKey: ["positions"],
 	queryFn: async () => {
 	    const response = await axios.get('/api/positions');
 	    return response.data;
 	    },
 	})
-    if (isPending) {
+    const searchQ = useQuery({
+	queryKey: ["searches"],
+	queryFn: async () => {
+	    const response = await axios.get('/api/searches');
+	    return response.data;
+	    },
+	})
+    if (posQ.isPending || searchQ.isPending) {
 	return null;
     };
-    if (error) {
-	console.log(`Failed to load positions: ${error}`);
+    if (posQ.error) {
+	console.log(`Failed to load positions: ${posQ.error}`);
 	return null;
     };
-       
+    if (searchQ.error) {
+	console.log(`Failed to load searches: ${searchQ.error}`);
+	return null;
+    };
+
+    const pos = posQ.data.find((i) => (i.name == session.position))
+    console.log(`Found pos: ${pos}`)
+    const search = searchQ.data.find((i) => (i.name == session.search))
+    console.log(`Found search: ${search}`)
+
+    const paths = search.TargetObjects.map(obj =>
+	<TargetPath target={obj.name} pos={pos}>
+	</TargetPath>)
+    
+    const targets = search.TargetObjects.map(obj =>
+	<Target target={obj.name} pos={pos}>
+	</Target>)
+    
     return (<Layer>
 		<CoordGrid>
 		</CoordGrid>
-		<TargetPath key={session.target} target={session.target}>
+		{paths}
+		<TargetPath target="Sun" pos={pos}>
 		</TargetPath>
-		<TargetPath key="sun" target="sun">
-		</TargetPath>
-		<Target key={session.target} target={session.target}>
-		</Target>
-		<Target key="sun" target="sun" fill="yellow">
+		{targets}
+		<Target pos={pos} target="Sun" fill="yellow">
 		</Target>
 	    </Layer>
 	   )

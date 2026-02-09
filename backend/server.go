@@ -13,11 +13,6 @@ import (
     "gorm.io/gorm"
 )
 
-type Session struct {
-    Username string `json:"username"`
-    Position string `json:"position"`
-}
-
 // Get the username from JWT. No error checking as this should be called
 // from endpoints with authentication and we can rely on having a valid
 // token contents.
@@ -27,6 +22,12 @@ func UsernameFromJWT(c echo.Context) string {
     return claims["username"].(string)
 }
 
+type Session struct {
+    Username string `json:"username"`
+    Position string `json:"position"`
+    Search string `json:"search"`
+}
+
 // Create a fresh session cookie if required.
 func makeNewSessionCookie(username string) (map[string]any, *http.Cookie) {
     new_cookie := new(http.Cookie)
@@ -34,6 +35,7 @@ func makeNewSessionCookie(username string) (map[string]any, *http.Cookie) {
     cookie_data := make(map[string]any)
     cookie_data["username"] = username
     cookie_data["position"] = "Helsinki"
+    cookie_data["search"] = "Planets"
     b, _ := json.Marshal(cookie_data)
     new_cookie.Value = base64.URLEncoding.EncodeToString(b)
     return cookie_data, new_cookie
@@ -63,7 +65,7 @@ func getSession(c echo.Context) error {
 	return c.JSON(http.StatusInternalServerError, "Failed to unmarshal JSON")
     }
 
-    if cookie_data["username"] != username || cookie_data["position"] == "" {
+    if cookie_data["username"] != username || cookie_data["position"] == "" || cookie_data["search"] == "" {
 	cookie_data, new_cookie := makeNewSessionCookie(username)
 	c.SetCookie(new_cookie)
 	return c.JSON(http.StatusOK, cookie_data)
@@ -92,6 +94,7 @@ func updateSession(c echo.Context) error {
     c.Bind(&updated_data)
     cookie_data["username"] = updated_data.Username
     cookie_data["position"] = updated_data.Position
+    cookie_data["search"] = updated_data.Search
 
     b, _ = json.Marshal(cookie_data)
     cookie.Value = base64.URLEncoding.EncodeToString(b)
@@ -148,16 +151,29 @@ func main() {
     // failure) in connecting to db doesn't prevent non-db endpoints
     // from going up (/health for example)
     db_chan := make(chan *gorm.DB)
+    retries := 0
     go ConnectDB(db_chan)
 
+    // This provides periodic log events from the server process and
+    // also implements a couple of retries for connecting to the database
+    // if it's slow to come online ("database system is starting up" error
+    // is treated as a fatal error by the driver when opening the connection)
     ticker := time.NewTicker(60 * time.Second)
 
     for {
 	select {
 	case t := <-ticker.C:
 	    e.Logger.Info("Tick ", t)
+	    if DB == nil && retries < 3 {
+		retries++
+		go ConnectDB(db_chan)
+	    }
 	case DB = <-db_chan:
 	    if DB != nil {
+		err := InitTestData(e, DB)
+		if err != nil {
+		    e.Logger.Fatal(err.Error())
+		}
 		RegisterDBEndpoints(e, r, DB)
 	    } else {
 		e.Logger.Error("Failed to connect to DB: ", DB_err)

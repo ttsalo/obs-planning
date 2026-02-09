@@ -17,7 +17,7 @@ var (
 	&gorm.Config{})
     err = MigrateDB(sqlite_db)
     e = echo.New()
-    _ = InitDB(e, sqlite_db)
+    _ = InitTestData(e, sqlite_db)
     u = "testuser"
     h = Handler{DB: sqlite_db,
 	UsernameFromJWT: testUsernameFromJWT}
@@ -85,4 +85,23 @@ func TestPositions(t *testing.T) {
     err = json.Unmarshal(rec.Body.Bytes(), &positions)
     assert.Equal(t, nil, err)
     assert.Equal(t, "Helsinki", positions[0].Name)
+}
+
+func TestSearches(t *testing.T) {
+    e := echo.New()
+    req := httptest.NewRequest(http.MethodGet, "/searches",
+	strings.NewReader(""))
+    rec := httptest.NewRecorder()
+    c := e.NewContext(req, rec)
+    
+    err := h.searches(c)
+    if err != nil { t.Fatal(err) }
+
+    var searches []TargetSearch
+    assert.Equal(t, http.StatusOK, rec.Code)
+    err = json.Unmarshal(rec.Body.Bytes(), &searches)
+    assert.Equal(t, nil, err)
+    assert.Equal(t, "Planets", searches[0].Name)
+    assert.Equal(t, 8, len(searches[0].TargetObjects))
+    assert.Equal(t, "Mercury", searches[0].TargetObjects[0].Name)
 }

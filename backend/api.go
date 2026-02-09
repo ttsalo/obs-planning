@@ -17,15 +17,11 @@ type Handler struct {
 // so that we can get the basic endpoints up even without a database.
 // r is the restricted (API) part of the url namespace.
 func RegisterDBEndpoints(e *echo.Echo, r *echo.Group, DB *gorm.DB) error {
-    err := InitDB(e, DB)
-    if err != nil {
-	return err
-    }
-
     h := Handler{DB: DB, UsernameFromJWT: UsernameFromJWT}
 
     e.POST("/login", h.login)
     r.GET("/positions", h.positions)
+    r.GET("/searches", h.searches)
 
     return nil
 }
@@ -74,11 +70,32 @@ func (h *Handler) positions(c echo.Context) error {
     if err != nil {
 	return c.JSON(http.StatusInternalServerError, err.Error())
     }
-    positions, err := gorm.G[Position](h.DB).Where(
+    positions, err := gorm.G[Position](h.DB).Select("ID", "name", "lat", "lon",
+	"min_az", "max_az", "min_alt", "max_alt").Where(
 	"user_id = ?", db_user.ID).Find(ctx)
     if err != nil {
 	return c.JSON(http.StatusInternalServerError, err.Error())
     } else {
 	return c.JSON(http.StatusOK, positions)
+    }
+}
+
+// Return stored searches for the current user. Expected number per user
+// is so small that filtering can be done on the client side.
+func (h *Handler) searches(c echo.Context) error {
+    ctx := context.Background()
+    username := h.UsernameFromJWT(c)
+    db_user, err := gorm.G[User](h.DB).Where(
+	"username = ?", username).First(ctx)
+    if err != nil {
+	return c.JSON(http.StatusInternalServerError, err.Error())
+    }
+    searches, err := gorm.G[TargetSearch](h.DB).Select("ID", "name",
+	"search_str").Where("user_id = ?", db_user.ID).Preload(
+	    "TargetObjects", nil).Find(ctx)
+    if err != nil {
+	return c.JSON(http.StatusInternalServerError, err.Error())
+    } else {
+	return c.JSON(http.StatusOK, searches)
     }
 }
