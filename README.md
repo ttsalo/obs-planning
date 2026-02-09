@@ -24,22 +24,33 @@ the path of the sun it's possible to see which direction the sun rises
 from and where it sets and when the different stages of illumination are
 happening.
 
-For both the sun and the selected object (limited to just one currently)
-the outline of the object path indicates the illumination of the sky in
-five stages from full night to full day, so it's possible to see where
-the object will be in the sky in the next 24 hours and when it will be
-dark enough to observe it.
+For both the sun and the selected objects the outline of the object
+path indicates the illumination of the sky in five stages from full
+night to full day, so it's possible to see where the object will be in
+the sky in the next 24 hours and when it will be dark enough to
+observe it. Basically, if you can see a dark line drawn above the
+horizon, the that target object will be visible in the night sky.
 
 Once loaded, the current position of the sun and the target object will
 be automatically updated once per minute.
 
-## Future roadmap
+## Versions
 
-- Define the observation window (altitude and azimuth limits and time limits)
-  highlight when the observation target(s) are in the selected window
-- Search for objects based on category and visibility in the selected
-  observation window
-- User accounts, authentication and persistent user profiles
+### 0.8.0
+
+First version with unlimited observation positions, searches and
+search results all stored on the server side database. User accounts,
+login and JWT authentication implemented.
+
+## Next steps
+
+- Implement clipping object paths to observability (in user-defined
+  alt-az limits and dark enough)
+- Custom sizes and colors for the solar system objects
+- On-hover infobox for the objects
+- Eliminate twilight transition time labels for objects other than sun
+  and replace with something more useful showing the times in the
+  period of observability
 
 ## Architecture
 
