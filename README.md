@@ -42,15 +42,20 @@ First version with unlimited observation positions, searches and
 search results all stored on the server side database. User accounts,
 login and JWT authentication implemented.
 
+### 0.8.1
+
+Implemented different sizes and colors for the planets. Sun and Moon
+have astronomically correct sizes except scaled up, planets have colors
+and sizes that should make them easily recognizable even without labels.
+
+![screenshot](examples/screenshot2.png)
+
 ## Next steps
 
 - Implement clipping object paths to observability (in user-defined
-  alt-az limits and dark enough)
-- Custom sizes and colors for the solar system objects
+  alt-az limits and dark enough) and add time details to these parts
+  of the paths
 - On-hover infobox for the objects
-- Eliminate twilight transition time labels for objects other than sun
-  and replace with something more useful showing the times in the
-  period of observability
 
 ## Architecture
 

@@ -8,6 +8,28 @@ import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
 	 Tag } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 
+// Artistic representations of solar system objects
+const objMap = new Map();
+objMap.set("Sun", {fill: "yellow", radius: null});
+objMap.set("Moon", {fill: "white", radius: null});
+objMap.set("Mercury", {fill: "darkgray", radius: 3.5});
+objMap.set("Venus", {fill: "papayawhip", radius: 4});
+objMap.set("Mars", {fill: "salmon", radius: 3.5});
+objMap.set("Jupiter", {fill: "orange", radius: 6});
+objMap.set("Saturn", {fill: "peachpuff", radius: 5.8});
+objMap.set("Uranus", {fill: "lightskyblue", radius: 5});
+objMap.set("Neptune", {fill: "cornflowerblue", radius: 5});
+
+// Draw the representation of a given object. 
+function ObsObject({target, x, y, radius}) {
+    const obj = objMap.get(target);
+    if (!obj) return null;
+    console.log(`${target} r=${radius}`);
+    return (<Circle fill={obj.fill} stroke="black" strokeWidth={1.5}
+		    x={x} y={y} radius={obj.radius || radius}>
+	    </Circle>)
+}
+
 // Component to plot the current position of the given target in the sky,
 // seen from the geographic location in the settings.
 function Target({target, pos, fill="white"}) {
@@ -34,16 +56,15 @@ function Target({target, pos, fill="white"}) {
     
     console.log(`Rendering object for ${target}`);
 
+    // The real (artificially zoomed) radius is only used for sun
+    // and moon, planets use artistic radius
     const props = {x: stageSize.get("azToPx")(data.az),
 		   y: stageSize.get("altToPx")(data.alt),
 		   radius: data.radius * stageSize.get("zoom")
-		   * (target == "Sun" || target == "Moon" ?
-		      stageSize.get("moonzoom") :
-		      stageSize.get("planetzoom"))}
-    
-    return (<Circle fill={fill} stroke="black" x={props.x}
-		    y={props.y} radius={props.radius}>
-	    </Circle>)
+                   * stageSize.get("moonzoom")}
+ 
+    return (<ObsObject target={target} x={props.x} y={props.y}
+		       radius={props.radius}></ObsObject>)
 };
 
 // Component to plot the future path of a given target in the sky,
@@ -82,6 +103,15 @@ function TargetPath({target, pos}) {
 	//console.log(`${target} crossed ${alt} with ratio ${d}`);
 	return [x1 + ((x2 - x1) * d), y1 + ((y2 - y1) * d),
 		new Date(ts1.getTime() + ((ts2 - ts1) * d))];
+    };
+
+    const minX = stageSize.get("azToPx")(pos.min_az);
+    const maxX = stageSize.get("azToPx")(pos.max_az);
+    const minY = stageSize.get("altToPx")(pos.min_alt);
+    const maxY = stageSize.get("altToPx")(pos.max_alt);
+
+    function checkObsWindow(x, y) {
+	return x > minX && x < maxX && y > minY && y < maxY;
     };
 
     const { isPending, error, data } = useQuery({
@@ -191,18 +221,21 @@ function TargetPath({target, pos}) {
 	      stroke={target == "sun" ? "yellow" : "white"} tension={1}>
 	</Line>)
 
-    const transitionEvs = transition_events.map(ev =>
-	<Label x={ev.x} y={ev.y} opacity={0.75}>
-	    <Tag fill="white" pointerDirection="up" pointerHeight={8}
-		 pointerWidth={5} stroke="black" strokeWidth={1}>
-	    </Tag>
-	    <Text fill="black" padding={1} align="center"
-		  fontFamily="Verdana" fontSize={12} 
-		  text={["N", "AT", "NT", "CT", "D"][ev.b] + "\n" +
-			String(ev.ts.getHours()).padStart(2, "0") + "\n" +
-			String(ev.ts.getMinutes()).padStart(2, "0")}>
-	    </Text>
-	</Label>)
+    var transitionEvs = null;
+    if (target == "Sun") {
+	transitionEvs = transition_events.map(ev =>
+	    <Label x={ev.x} y={ev.y} opacity={0.75}>
+		<Tag fill="white" pointerDirection="up" pointerHeight={8}
+		     pointerWidth={5} stroke="black" strokeWidth={1}>
+		</Tag>
+		<Text fill="black" padding={1} align="center"
+		      fontFamily="Verdana" fontSize={12} 
+		      text={["N", "AT", "NT", "CT", "D"][ev.b] + "\n" +
+			    String(ev.ts.getHours()).padStart(2, "0") + "\n" +
+			    String(ev.ts.getMinutes()).padStart(2, "0")}>
+		</Text>
+	    </Label>)
+    }
 
     return (<>
 		{outerSegs}
@@ -340,9 +373,7 @@ const ObsStage = () => {
     };
 
     const pos = posQ.data.find((i) => (i.name == session.position))
-    console.log(`Found pos: ${pos}`)
     const search = searchQ.data.find((i) => (i.name == session.search))
-    console.log(`Found search: ${search}`)
 
     const paths = search.TargetObjects.map(obj =>
 	<TargetPath target={obj.name} pos={pos}>
@@ -351,14 +382,18 @@ const ObsStage = () => {
     const targets = search.TargetObjects.map(obj =>
 	<Target target={obj.name} pos={pos}>
 	</Target>)
-    
+
+    // Construct the view of the sky. The elements later in the list are
+    // drawn on top of the earlier ones, so we want the objects on
+    // top of the paths except the sun path on top of everything but
+    // the sun itself so that the illumination labels aren't obscured.
     return (<Layer>
 		<CoordGrid>
 		</CoordGrid>
 		{paths}
+		{targets}
 		<TargetPath target="Sun" pos={pos}>
 		</TargetPath>
-		{targets}
 		<Target pos={pos} target="Sun" fill="yellow">
 		</Target>
 	    </Layer>
