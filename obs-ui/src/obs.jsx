@@ -24,7 +24,6 @@ objMap.set("Neptune", {fill: "cornflowerblue", radius: 5});
 function ObsObject({target, x, y, radius}) {
     const obj = objMap.get(target);
     if (!obj) return null;
-    console.log(`${target} r=${radius}`);
     return (<Circle fill={obj.fill} stroke="black" strokeWidth={1.5}
 		    x={x} y={y} radius={obj.radius || radius}>
 	    </Circle>)
@@ -105,13 +104,9 @@ function TargetPath({target, pos}) {
 		new Date(ts1.getTime() + ((ts2 - ts1) * d))];
     };
 
-    const minX = stageSize.get("azToPx")(pos.min_az);
-    const maxX = stageSize.get("azToPx")(pos.max_az);
-    const minY = stageSize.get("altToPx")(pos.min_alt);
-    const maxY = stageSize.get("altToPx")(pos.max_alt);
-
-    function checkObsWindow(x, y) {
-	return x > minX && x < maxX && y > minY && y < maxY;
+    function checkObsWindow(alt, az) {
+	return (alt > pos.min_alt && alt < pos.max_alt &&
+		az > pos.min_az && az < pos.max_az);
     };
 
     const { isPending, error, data } = useQuery({
@@ -153,6 +148,7 @@ function TargetPath({target, pos}) {
     let prev_sy = null;
     let prev_ts = null;
     let prev_brightness = null;
+    let prev_vis = null;
     
     // Latest values pulled from the remote data
     let x = 0;
@@ -160,6 +156,9 @@ function TargetPath({target, pos}) {
     let sy = 0;
     let ts = null;
     let brightness = null;
+    let vis = null;
+    let wrap = null;
+    let vis_change = null;
     
     for (const elem in data.series) {
 	x = stageSize.get("azToPx")(data.series[elem].az);
@@ -168,16 +167,29 @@ function TargetPath({target, pos}) {
 	    data.series[elem].sun_alt);
 	ts = new Date(data.series[elem].ts);
 	brightness = altToBrightness(data.series[elem]);
+	vis = (target == "Sun") || checkObsWindow(data.series[elem].alt, data.series[elem].az);
+
+	wrap = (prev_x != null && prev_x > x);
+	vis_change = (vis != null && prev_vis != null && vis != prev_vis);
 	
-	if (prev_x != null && prev_x > x) {
-	    // Segment wrapped around the right side of the stage,
-	    // break up the line into segments to avoid drawing a
-	    // line back to left across the stage. 
-	    inner_segments.push(inner_points);
+	if (wrap || vis_change) {
+	    // This datapoint is crossing a discontinuity either at
+	    // az=360 or to/from observation window, break the currently
+	    // collected line into a separate segment and start building
+	    // the next one.
+	    if (prev_vis) {
+		// Collect segments if this is the az wrap or a visibility
+		// change from visible to not visible, otherwise discard.
+		// If we wanted a different processing for non-visible
+		// segments, they could be stored somewhere else and handled
+		// later separately. (Same for other conditional pushes below)
+		inner_segments.push(inner_points);
+		outer_segments.push([brightness, outer_points]);
+	    }
 	    inner_points = [];
-	    outer_segments.push([brightness, outer_points]);
 	    outer_points = [];
 	    prev_brightness = null;
+	    prev_vis = null;
 	}
 	
 	inner_points.push(x);
@@ -185,9 +197,7 @@ function TargetPath({target, pos}) {
 	
 	if (prev_brightness != null && prev_brightness != brightness) {
 	    // The path crossed a brightness limit, break it into
-	    // a separate segment marked with the brigness. XXX
-	    // needs interpolation so that we can cut the segment
-	    // at the exact point.
+	    // a separate segment marked with the brigness.
 	    const [dx, dy, dts] = interpolateTransition(
 		prev_x, prev_y, prev_sy, prev_ts,
 		x, y, sy, ts, prev_brightness, brightness);
@@ -195,22 +205,28 @@ function TargetPath({target, pos}) {
 				    b: brightness});
 	    outer_points.push(dx);
 	    outer_points.push(dy);
-	    outer_segments.push([prev_brightness, outer_points]);
+	    if (vis) {
+		outer_segments.push([prev_brightness, outer_points]);
+	    }
 	    outer_points = [dx, dy];
 	} else {
 	    outer_points.push(x);
 	    outer_points.push(y);
 	}
+	prev_vis = vis;
 	prev_brightness = brightness;
 	prev_x = x;
 	prev_y = y;
 	prev_sy = sy;
 	prev_ts = ts;
     };
-    inner_segments.push(inner_points);
-    outer_segments.push([brightness, outer_points]);
+    if (vis) {
+	inner_segments.push(inner_points);
+	outer_segments.push([brightness, outer_points]);
+    }
 
-    const outerSegs = outer_segments.map(seg =>
+    const outerSegs = outer_segments.filter(
+	seg => target == "Sun" || seg[0] < 4).map(seg =>
 	<Line points={seg[1]} strokeWidth={5} 
 	      stroke={brightnessToColor[seg[0]]} tension={1}
 	      shadowColor={brightnessToColor[seg[0]]} shadowBlur={10}>
@@ -218,7 +234,7 @@ function TargetPath({target, pos}) {
 
     const innerSegs = inner_segments.map(seg =>
 	<Line points={seg} strokeWidth={1} 
-	      stroke={target == "sun" ? "yellow" : "white"} tension={1}>
+	      stroke={target == "Sun" ? "yellow" : "white"} tension={1}>
 	</Line>)
 
     var transitionEvs = null;

@@ -50,11 +50,17 @@ and sizes that should make them easily recognizable even without labels.
 
 ![screenshot](examples/screenshot2.png)
 
+### 0.8.2
+
+The object paths are now clipped to the observability limits. Also
+removed the daytime brightness from other objects than sun to make the
+view less busy and to indicate easier when the objects are properly
+visible (dark enough).
+
+![screenshot](examples/screenshot3.png)
+
 ## Next steps
 
-- Implement clipping object paths to observability (in user-defined
-  alt-az limits and dark enough) and add time details to these parts
-  of the paths
 - On-hover infobox for the objects
 
 ## Architecture
