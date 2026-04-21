@@ -24,3 +24,6 @@ aws-cleanup:
 
 docker-cleanup:
 	docker system prune
+
+docker-full-cleanup: docker-cleanup
+	docker builder prune -a

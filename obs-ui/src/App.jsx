@@ -1,15 +1,17 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Button, Flex, Layout, ConfigProvider, Typography, Input, InputNumber,
-	 Space, Modal, Row, Col, Select } from 'antd';
+	 Space, Modal, Row, Col, Select, DatePicker, TimePicker } from 'antd';
 import { Stage, Layer, Rect, Circle, Text } from 'react-konva';
+import dayjs from 'dayjs';
 import axios from 'axios';
 import ObsStage from './obs.jsx';
 import { SessionContext, StageContext, updateSession } from './session.jsx'
 
 const App = () => {
-    // Global session context 
+    // Global session context. This is a bit special state since it's
+    // set by reading or writing it to server side for persistence.
     const [session, setSession] = useState(null);
-    
+
     useEffect(() => {
 	const fetchData = async () => {
 	    try {
@@ -49,9 +51,25 @@ const App = () => {
     stageMap.set("moonzoom", 10.0);
     // Make the planets relatively bigger
     stageMap.set("planetzoom", 200.0);
+    // Date and time to calculate. If both are null, tracks current time.
+    stageMap.set("date", null);
+    stageMap.set("time", null);
+    // Initial current time
+    stageMap.set("renderts", new Date());
     calcLimits(stageMap);
     
     const [stageSize, setStageSize] = useState(stageMap)
+
+    // Update the render time every minute, triggers re-rendering
+    // the observation canvas
+    useEffect(() => {
+	const intervalId = setInterval(() => {
+	    const newStageMap = new Map(stageSize);
+	    newStageMap.set("renderts", new Date());
+	    setStageSize(newStageMap);
+	}, 60 * 1000);
+	return () => clearInterval(intervalId);
+    }, []);
     
     // Reference to parent container
     const containerRef = useRef(null);
@@ -167,6 +185,20 @@ const App = () => {
 		   </Modal>
 	       </ConfigProvider>
     };
+    
+    const onTimeChange = (time, timeString) => {
+	const newStageMap = new Map(stageSize);
+	newStageMap.set("time", time);
+	setStageSize(newStageMap);
+	console.log(time, timeString);
+    };
+
+    const onDateChange = (date, dateString) => {
+	const newStageMap = new Map(stageSize);
+	newStageMap.set("date", date);
+	setStageSize(newStageMap);
+	console.log(date, dateString);
+    };
 
     return <SessionContext value={session}>
 	       <Layout style={{ minHeight: '100vh', minWidth: '100vw' }}>
@@ -178,6 +210,29 @@ const App = () => {
 				   Observations Planner
 			       </Typography.Title>
 			       <Space>
+				   <ConfigProvider theme={{token:
+							   {colorBgContainer:
+							    '#2f325e',
+							    colorBgElevated:
+							    '#4f527e',
+							    cellActiveWithRangeBg:
+							    '#6f729e',
+							    cellHoverWithRangeBg:
+							    '#6f729e',
+							    colorTextQuaternary:
+							    '#e0e0e0',
+							    colorIcon:
+							    '#e0e0e0'
+							   }}}>
+				       <Space.Compact>
+					   <DatePicker
+					       onChange={onDateChange} />
+				       </Space.Compact>
+				       <Space.Compact>
+					   <TimePicker
+					       onChange={onTimeChange} />
+				       </Space.Compact>
+				   </ConfigProvider>
 				   <Space.Compact>
 				       <Typography.Text strong={true}>
 					   Lat:
@@ -237,7 +292,7 @@ const App = () => {
 		       <Flex justify="center" align="middle"
 			     style={{ height: '100%' }}>
 			   <Space>
-			   © Tomi T. Salo 2025
+			   © Tomi T. Salo 2025-2026
 			   <a href={`http://${window.location.hostname}:8081/apidocs/`}>
 			   Apidoc (astro)</a>
 			   <a href={`http://${window.location.hostname}/health`}>

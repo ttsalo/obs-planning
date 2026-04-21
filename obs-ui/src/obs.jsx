@@ -29,6 +29,26 @@ function ObsObject({target, x, y, radius}) {
 	    </Circle>)
 }
 
+// Calculate the timestamp to render based on current render timestamp
+// on the context, modified by the optionally user-selected date and
+// time
+function CalcRenderTS(stageSize) {
+    const ts = new Date(stageSize.get("renderts"));
+    const time = stageSize.get("time");
+    const date = stageSize.get("date");
+    if (time != null) {
+	ts.setHours(time.hour());
+	ts.setMinutes(time.minute());
+	ts.setSeconds(time.second());
+    }
+    if (date != null) {
+	ts.setFullYear(date.year());
+	ts.setMonth(date.month());
+	ts.setDate(date.date());
+    }
+    return ts;
+}
+
 // Component to plot the current position of the given target in the sky,
 // seen from the geographic location in the settings.
 function Target({target, pos, fill="white"}) {
@@ -37,17 +57,18 @@ function Target({target, pos, fill="white"}) {
 
     console.log(`Target(${target})`);
     
+    const renderTS = CalcRenderTS(stageSize);
+    
     const { isPending, error, data } = useQuery({
-	queryKey: ['targetData', target],
+	queryKey: ['targetData', target, renderTS],
 	queryFn: async () => {
 	    const resp = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj`,
 		{target: target, lat: pos.lat,
-		 lon: pos.lon, time: new Date()},
+		 lon: pos.lon, time: renderTS},
 		{timeout: 120 * 1000});
 	    return resp.data;
-	},
-	refetchInterval: 60 * 1000
+	}
     });
 
     if (error) { console.log(`error=${error}`)};
@@ -109,17 +130,24 @@ function TargetPath({target, pos}) {
 		az > pos.min_az && az < pos.max_az);
     };
 
+    const renderTS = CalcRenderTS(stageSize);
+
+    // The datetime part of the query key is divided so that it has
+    // a half an hour granularity, so the one minute intervals for
+    // updating target object positions don't re-query the path data
+    // more of then than that.
     const { isPending, error, data } = useQuery({
-	queryKey: ['targetPathData', target],
+	queryKey: ['targetPathData', target,
+		   Math.floor(renderTS / 1000 / 60 / 30)],
 	queryFn: async () => {
 	    const resp = await axios.post(
 		`//${window.location.hostname}:8081/api/get-obj-timeseries`,
 		{target: target, lat: pos.lat,
-		 lon: pos.lon, time: new Date(), timespan: "day"},
+		 lon: pos.lon, time: renderTS,
+		 timespan: "day"},
 	    	{timeout: 120 * 1000});
 	    return resp.data;
-	},
-	refetchInterval: 30 * 60 * 1000
+	}
     });
 
     if (error) { console.log(`error=${error}`)};
