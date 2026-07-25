@@ -180,7 +180,18 @@ as these will interfere with the sso login, whose details are looked up from whe
 
 ## Deployment cycle in AWS
 
-Requirement: images need to have been pushed to AWS repositories
+Requirements:
+- Images need to have been pushed to AWS repositories (`make aws-push`).
+- An Aiven Postgres service must exist, and its connection details must be stored in an AWS Secrets Manager secret named `obs-planning/aiven-pg` as a JSON blob. The CDK stack looks this secret up by name and injects each field into the Go container. Create it once with:
+
+```
+aws secretsmanager create-secret \
+  --name obs-planning/aiven-pg \
+  --region eu-north-1 \
+  --secret-string '{"host":"<pg-xxx.aivencloud.com>","port":"<Aiven port>","user":"avnadmin","password":"<pwd>","dbname":"defaultdb"}'
+```
+
+Values come from the Aiven service overview page. All fields are strings.
 
 ```
 cd obs_ecs

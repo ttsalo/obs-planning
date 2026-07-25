@@ -7,8 +7,8 @@ import aws_cdk.aws_ecs as ecs
 import aws_cdk.aws_ecs_patterns as ecsp
 import aws_cdk.aws_ecr as ecr
 import aws_cdk.aws_ec2 as ec2
-import aws_cdk.aws_rds as rds
 import aws_cdk.aws_elasticloadbalancingv2 as elbv2
+import aws_cdk.aws_secretsmanager as secretsmanager
 
 
 class ObsEcsStack(cdk.Stack):
@@ -25,19 +25,12 @@ class ObsEcsStack(cdk.Stack):
         vpc = ec2.Vpc(self, "ObsVpc", max_azs=2)
         cluster = ecs.Cluster(self, "ObsCluster", vpc=vpc)
 
-        db_instance = rds.DatabaseInstance(
-            self, "PostgresInstance",
-            engine=rds.DatabaseInstanceEngine.postgres(
-                version=rds.PostgresEngineVersion.VER_15
-            ),
-            instance_type=ec2.InstanceType.of(
-                ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.MICRO
-            ),
-            vpc=vpc,
-            vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-            ),
-            database_name="obs_db",
+        # Aiven-hosted Postgres. The connection details live in a
+        # pre-created AWS Secrets Manager secret (JSON with host, port,
+        # user, password, dbname keys); see README for the create-secret
+        # command.
+        aiven_secret = secretsmanager.Secret.from_secret_name_v2(
+            self, "AivenPgSecret", "obs-planning/aiven-pg"
         )
 
         taskdef1 = ecs.FargateTaskDefinition(self, "ObsServerTask",
@@ -60,15 +53,18 @@ class ObsEcsStack(cdk.Stack):
             ),
             secrets={
                 "OBS_DB_PASSWORD": ecs.Secret.from_secrets_manager(
-                    db_instance.secret, "password"),
+                    aiven_secret, "password"),
                 "OBS_DB_HOST": ecs.Secret.from_secrets_manager(
-                    db_instance.secret, "host"),
+                    aiven_secret, "host"),
                 "OBS_DB_USER": ecs.Secret.from_secrets_manager(
-                    db_instance.secret, "username"),
+                    aiven_secret, "user"),
+                "OBS_DB_NAME": ecs.Secret.from_secrets_manager(
+                    aiven_secret, "dbname"),
+                "OBS_DB_PORT": ecs.Secret.from_secrets_manager(
+                    aiven_secret, "port"),
             },
             environment={
-                "OBS_DB_NAME": "obs_db",
-                "OBS_DB_PORT": "5432"
+                "OBS_DB_SSLMODE": "require",
             })
         
         container1.add_port_mappings(
@@ -84,8 +80,6 @@ class ObsEcsStack(cdk.Stack):
             public_load_balancer=True,
             service_name="ObsServerAPIService"
         )
-
-        db_instance.connections.allow_default_port_from(serv1.service)
 
         with open("../astrobackend/repository.json", "r") as f:
             repository2 = json.load(f)

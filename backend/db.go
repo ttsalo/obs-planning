@@ -143,11 +143,15 @@ var DB_err error
 // given channel, or nil when unsuccessful.
 func ConnectDB(db_chan chan<- *gorm.DB) {
     var DB *gorm.DB
-    
-    dsn := fmt.Sprintf("host=%v user=%v password=%v dbname=%v port=%v",
+
+    sslmode := os.Getenv("OBS_DB_SSLMODE")
+    if sslmode == "" {
+	sslmode = "disable"
+    }
+    dsn := fmt.Sprintf("host=%v user=%v password=%v dbname=%v port=%v sslmode=%v",
 	os.Getenv("OBS_DB_HOST"), os.Getenv("OBS_DB_USER"),
 	os.Getenv("OBS_DB_PASSWORD"), os.Getenv("OBS_DB_NAME"),
-	os.Getenv("OBS_DB_PORT"))
+	os.Getenv("OBS_DB_PORT"), sslmode)
     DB, DB_err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 
     if DB_err == nil {
