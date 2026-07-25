@@ -15,6 +15,15 @@ from astropy.time import Time
 from astropy.timeseries import TimeSeries
 from astropy.coordinates import solar_system_ephemeris, EarthLocation, AltAz
 from astropy.coordinates import get_body
+from astropy.utils import iers
+
+# Prevent astropy from downloading + CDS-parsing IERS_A on the WSGI
+# request path — that download used to block all four gunicorn workers
+# past the 30 s timeout for any "today" request (OBS-6). Astropy falls
+# back to the bundled long-term IERS_B table; the resulting polar-motion
+# error is well below one arcsecond and invisible in the sky renderer.
+iers.conf.auto_download = False
+iers.conf.iers_degraded_accuracy = "ignore"
 
 import schemas
 
