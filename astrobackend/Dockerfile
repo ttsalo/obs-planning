@@ -8,6 +8,10 @@ RUN dnf update -y && dnf install -y python3 python3-pip make
 
 RUN mkdir /opt/obs-astro
 WORKDIR /opt/obs-astro
+# Keep astropy's cache and any downloads on the WORKDIR filesystem, so
+# it stops warning "Invalid cross-device link" when moving downloaded
+# files into ~/.astropy from a tmpfs staging area.
+ENV HOME=/opt/obs-astro
 RUN python3 -m venv .astrovenv
 ADD requirements.txt .
 # commented lines are for updating the pinned requirements versions
@@ -23,4 +27,4 @@ ADD . .
 
 EXPOSE 8000
 
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0", "server:app"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0", "--timeout", "60", "--preload", "--max-requests", "100", "--max-requests-jitter", "20", "server:app"]

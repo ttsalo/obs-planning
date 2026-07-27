@@ -8,6 +8,7 @@ import aws_cdk.aws_ecs_patterns as ecsp
 import aws_cdk.aws_ecr as ecr
 import aws_cdk.aws_ec2 as ec2
 import aws_cdk.aws_elasticloadbalancingv2 as elbv2
+import aws_cdk.aws_logs as logs
 import aws_cdk.aws_secretsmanager as secretsmanager
 
 
@@ -43,6 +44,10 @@ class ObsEcsStack(cdk.Stack):
                     repository_arn=repository["repositoryArn"])),
             memory_limit_mib=1024,
             cpu=256,
+            logging=ecs.LogDrivers.aws_logs(
+                stream_prefix="obs-backend",
+                log_retention=logs.RetentionDays.TWO_WEEKS,
+            ),
             health_check=ecs.HealthCheck(
                 command=["CMD-SHELL",
                          "curl -f http://localhost/health || exit 1"],
@@ -98,8 +103,12 @@ class ObsEcsStack(cdk.Stack):
                 ecr.Repository.from_repository_arn(
                     scope=self, id="ObsAstroServerRepo",
                     repository_arn=repository2["repositoryArn"])),
-            memory_limit_mib=1024,
+            memory_limit_mib=1792,
             cpu=256,
+            logging=ecs.LogDrivers.aws_logs(
+                stream_prefix="obs-astro",
+                log_retention=logs.RetentionDays.TWO_WEEKS,
+            ),
             health_check=ecs.HealthCheck(
                 command=["CMD-SHELL",
                          "curl -f http://localhost:8000/health || exit 1"],

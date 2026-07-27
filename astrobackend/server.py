@@ -1,20 +1,53 @@
+import logging
 import math
+import traceback
+import uuid
 
 from apispec.ext.marshmallow import MarshmallowPlugin
 from apispec_webframeworks.flask import FlaskPlugin
 from flask import Flask, request, make_response, jsonify
 from flasgger import APISpec, Swagger, Schema, fields, validate, swag_from
 from http import HTTPStatus
+from werkzeug.exceptions import HTTPException
 
 from astropy import units as u
 from astropy.time import Time
 from astropy.timeseries import TimeSeries
 from astropy.coordinates import solar_system_ephemeris, EarthLocation, AltAz
 from astropy.coordinates import get_body
+from astropy.utils import iers
+
+# Prevent astropy from downloading + CDS-parsing IERS_A on the WSGI
+# request path — that download used to block all four gunicorn workers
+# past the 30 s timeout for any "today" request (OBS-6). Astropy falls
+# back to the bundled long-term IERS_B table; the resulting polar-motion
+# error is well below one arcsecond and invisible in the sky renderer.
+iers.conf.auto_download = False
+iers.conf.iers_degraded_accuracy = "ignore"
 
 import schemas
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
 app = Flask(__name__)
+
+
+@app.errorhandler(Exception)
+def handle_uncaught_exception(err):
+    # Let Flask/Werkzeug HTTP errors (400s from schema validation,
+    # 404s, etc.) flow through untouched.
+    if isinstance(err, HTTPException):
+        return err
+    error_id = uuid.uuid4().hex[:8]
+    app.logger.error(
+        "unhandled-exception id=%s path=%s json=%s traceback=%s",
+        error_id, request.path, request.get_json(silent=True),
+        traceback.format_exc(),
+    )
+    return jsonify({"error": "internal", "error_id": error_id}), 500
 
     
 spec = APISpec(
@@ -146,33 +179,40 @@ def get_obj_timeseries():
     except Exception as err:
         return jsonify(err.messages), 400
 
-    loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
+    try:
+        loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
 
-    if data.get("timespan") == "day":
-        ts = TimeSeries(time_start=data["time"],
-                        time_delta=1800 * u.s,
-                        n_samples=48)
-        with solar_system_ephemeris.set('de432s'):
-            aas = [get_body(data["target"], t["time"], loc).transform_to(
-                AltAz(obstime=t["time"], location=loc)) for t in ts]
-            if not data["target"] == "sun":
-                sun_aas = [get_body("sun", t["time"], loc).transform_to(
+        if data.get("timespan") == "day":
+            ts = TimeSeries(time_start=data["time"],
+                            time_delta=1800 * u.s,
+                            n_samples=48)
+            with solar_system_ephemeris.set('de432s'):
+                aas = [get_body(data["target"], t["time"], loc).transform_to(
                     AltAz(obstime=t["time"], location=loc)) for t in ts]
-                sun_radius = 696340.0 / sun_aas[0].distance.km * 180 / math.pi
-                resp = make_response(
-                    {"series": [{"alt": i[0].alt.deg, "az": i[0].az.deg,
-                                 "sun_alt": i[1].alt.deg + sun_radius,
-                                 "ts": i[0].obstime.value.isoformat() + "Z"}
-                                for i in zip(aas, sun_aas)]})
-            else:
-                sun_radius = 696340.0 / aas[0].distance.km * 180 / math.pi
-                resp = make_response(
-                    {"series": [{"alt": aa.alt.deg,
-                                 "az": aa.az.deg,
-                                 "sun_alt": aa.alt.deg +
-                                 sun_radius,
-                                 "ts": aa.obstime.value.isoformat() + "Z"}
-                                for aa in aas]})
-        
-    return resp
+                if not data["target"] == "sun":
+                    sun_aas = [get_body("sun", t["time"], loc).transform_to(
+                        AltAz(obstime=t["time"], location=loc)) for t in ts]
+                    sun_radius = 696340.0 / sun_aas[0].distance.km * 180 / math.pi
+                    resp = make_response(
+                        {"series": [{"alt": i[0].alt.deg, "az": i[0].az.deg,
+                                     "sun_alt": i[1].alt.deg + sun_radius,
+                                     "ts": i[0].obstime.value.isoformat() + "Z"}
+                                    for i in zip(aas, sun_aas)]})
+                else:
+                    sun_radius = 696340.0 / aas[0].distance.km * 180 / math.pi
+                    resp = make_response(
+                        {"series": [{"alt": aa.alt.deg,
+                                     "az": aa.az.deg,
+                                     "sun_alt": aa.alt.deg +
+                                     sun_radius,
+                                     "ts": aa.obstime.value.isoformat() + "Z"}
+                                    for aa in aas]})
+
+        return resp
+    except Exception:
+        app.logger.exception(
+            "astro-timeseries-fail target=%s lat=%s lon=%s time=%s",
+            data.get("target"), data.get("lat"), data.get("lon"), data.get("time"),
+        )
+        raise
 

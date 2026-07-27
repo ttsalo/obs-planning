@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+
+import astropy.utils.data
 import pytest
 import server
 
@@ -90,3 +93,47 @@ def test_get_obj_sunrise(client):
                   "time": "2025-12-12T07:15:00.000Z"})
     assert response.status_code == 200
 #    assert (response.json["alt"] + response.json["radius"]) == 0
+
+
+def test_get_obj_timeseries_today_hits_no_network(client, monkeypatch):
+    # Regression guard for OBS-6: astropy used to auto-download+parse
+    # IERS_A on the request path for "today" times, blowing past
+    # gunicorn's worker timeout. `iers.conf.auto_download = False` in
+    # server.py should prevent any network attempt for today's date.
+    def no_network(*a, **kw):
+        raise AssertionError(
+            f"unexpected network call during request: args={a} kwargs={kw}")
+    monkeypatch.setattr(astropy.utils.data, "download_file", no_network)
+
+    today = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    response = client.post("/api/get-obj-timeseries",
+            json={"target": "moon", "lat": 60, "lon": 24, "timespan": "day",
+                  "time": today})
+    assert response.status_code == 200
+    assert isinstance(response.json["series"][0]["az"], float)
+
+
+def test_get_obj_timeseries_500_is_logged(app, monkeypatch, caplog):
+    # Flask's TESTING=True short-circuits the errorhandler by
+    # propagating exceptions. Turn it off so this test exercises the
+    # actual production error path.
+    app.config["TESTING"] = False
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    client = app.test_client()
+
+    def boom(*a, **kw):
+        raise RuntimeError("simulated astropy failure")
+    monkeypatch.setattr(server, "get_body", boom)
+
+    with caplog.at_level("ERROR"):
+        response = client.post("/api/get-obj-timeseries",
+                json={"target": "moon", "lat": 60, "lon": 24,
+                      "timespan": "day",
+                      "time": "2025-12-10T22:42:33.015Z"})
+    assert response.status_code == 500
+    assert response.json["error"] == "internal"
+    assert len(response.json["error_id"]) == 8
+    joined = "\n".join(rec.message for rec in caplog.records)
+    assert "astro-timeseries-fail" in joined
+    assert "unhandled-exception" in joined
+    assert "simulated astropy failure" in joined
