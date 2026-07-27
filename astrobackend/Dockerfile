@@ -27,4 +27,4 @@ ADD . .
 
 EXPOSE 8000
 
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0", "--timeout", "60", "server:app"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0", "--timeout", "60", "--preload", "--max-requests", "100", "--max-requests-jitter", "20", "server:app"]

@@ -103,7 +103,7 @@ class ObsEcsStack(cdk.Stack):
                 ecr.Repository.from_repository_arn(
                     scope=self, id="ObsAstroServerRepo",
                     repository_arn=repository2["repositoryArn"])),
-            memory_limit_mib=1024,
+            memory_limit_mib=1792,
             cpu=256,
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="obs-astro",
