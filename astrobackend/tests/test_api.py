@@ -95,6 +95,52 @@ def test_get_obj_sunrise(client):
 #    assert (response.json["alt"] + response.json["radius"]) == 0
 
 
+def test_get_obj_timeseries_shape_and_length(client):
+    response = client.post("/api/get-obj-timeseries",
+            json={"target": "moon", "lat": 60, "lon": 24, "timespan": "day",
+                  "time": "2025-12-10T22:42:33.015Z"})
+    assert response.status_code == 200
+    series = response.json["series"]
+    assert len(series) == 48
+    for pt in series:
+        assert set(pt.keys()) == {"alt", "az", "sun_alt", "ts"}
+        assert isinstance(pt["alt"], float)
+        assert isinstance(pt["az"], float)
+        assert isinstance(pt["sun_alt"], float)
+        assert pt["ts"].endswith("Z")
+    # Adjacent samples are 30 minutes apart.
+    from datetime import datetime
+    t0 = datetime.fromisoformat(series[0]["ts"].replace("Z", ""))
+    t1 = datetime.fromisoformat(series[1]["ts"].replace("Z", ""))
+    assert (t1 - t0).total_seconds() == 30 * 60
+
+
+def test_get_obj_timeseries_reuses_cached_sun_series(client, monkeypatch):
+    from astropy.coordinates import get_body as real_get_body
+    call_log = []
+
+    def counting_get_body(body, times, loc, *a, **kw):
+        call_log.append(str(body).lower())
+        return real_get_body(body, times, loc, *a, **kw)
+    monkeypatch.setattr(server, "get_body", counting_get_body)
+    server._sun_alt_series.cache_clear()
+
+    common = {"lat": 60, "lon": 24, "timespan": "day",
+              "time": "2025-12-10T22:42:33.015Z"}
+    r1 = client.post("/api/get-obj-timeseries", json={"target": "moon", **common})
+    assert r1.status_code == 200
+    assert "sun" in call_log, f"first call should compute the sun; got {call_log}"
+    call_log.clear()
+
+    r2 = client.post("/api/get-obj-timeseries", json={"target": "jupiter", **common})
+    assert r2.status_code == 200
+    assert "sun" not in call_log, \
+        f"second call should hit the sun cache; got {call_log}"
+    # And the sun_alt values are identical across the two responses.
+    for i in range(48):
+        assert r1.json["series"][i]["sun_alt"] == r2.json["series"][i]["sun_alt"]
+
+
 def test_get_obj_timeseries_today_hits_no_network(client, monkeypatch):
     # Regression guard for OBS-6: astropy used to auto-download+parse
     # IERS_A on the request path for "today" times, blowing past
