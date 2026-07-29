@@ -7,6 +7,8 @@ import Konva from 'konva';
 import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
 	 Tag } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
+import { altToBrightness, brightnessChangeToAlt, checkObsWindow,
+	 findUpcomingTransitions } from './transitions.jsx'
 
 // Artistic representations of solar system objects
 const objMap = new Map();
@@ -29,6 +31,59 @@ function ObsObject({target, x, y, radius}) {
 	    </Circle>)
 }
 
+function fmtTime(ts) {
+    return `${String(ts.getHours()).padStart(2, "0")}:` +
+	`${String(ts.getMinutes()).padStart(2, "0")}`;
+}
+
+const brightnessLabel = ["Night", "Astro twilight", "Nautical twilight",
+			  "Civil twilight", "Day"];
+
+// Hover/tap tooltip for a target marker: name, current alt/az, and the
+// next upcoming brightness and visibility transitions. pointerDirection
+// defaults to centering the box above the marker, but the caller passes
+// "left"/"right" near the edges of the visible area so the box is anchored
+// away from the edge instead of clipping off it (see edgePointerDirection).
+function TargetTooltip({target, alt, az, x, y, transitions,
+			 pointerDirection = "up"}) {
+    const text = [
+	target,
+	`Alt ${alt.toFixed(1)}°  Az ${az.toFixed(1)}°`,
+	transitions.brightness
+	    ? `Next: ${brightnessLabel[transitions.brightness.b]} ` +
+	      `${fmtTime(transitions.brightness.ts)}`
+	    : "Next: no change",
+	transitions.visibility
+	    ? `${transitions.visibility.vis ? "Rises" : "Sets"} ` +
+	      `${fmtTime(transitions.visibility.ts)}`
+	    : "Visibility: no change"
+    ].join("\n");
+
+    return (<Label x={x} y={y} opacity={0.9}>
+		<Tag fill="white" pointerDirection={pointerDirection}
+		     pointerHeight={8} pointerWidth={5} stroke="black"
+		     strokeWidth={1} lineJoin="round">
+		</Tag>
+		<Text fill="black" padding={4} align="left"
+		      fontFamily="Verdana" fontSize={11} text={text}>
+		</Text>
+	    </Label>);
+}
+
+// The tooltip box is centered on its anchor x for pointerDirection "up",
+// so near the left/right edges of the visible area it would run off the
+// edge; anchor it to the opposite side there instead ("left" keeps the box
+// to the right of x, "right" keeps it to the left of x). The margin is a
+// rough estimate of half the tooltip's rendered width, in the same fudged
+// spirit as CoordGrid's label-position adjustments.
+function edgePointerDirection(x, stageSize) {
+    const edgeMargin = 130;
+    const visibleWidth = stageSize.get("width") / stageSize.get("scale");
+    if (x < edgeMargin) return "left";
+    if (x > visibleWidth - edgeMargin) return "right";
+    return "up";
+}
+
 // Calculate the timestamp to render based on current render timestamp
 // on the context, modified by the optionally user-selected date and
 // time
@@ -49,17 +104,35 @@ function CalcRenderTS(stageSize) {
     return ts;
 }
 
-// Component to plot the current position of the given target in the sky,
-// seen from the geographic location in the settings.
-function Target({target, pos, fill="white"}) {
-    const session = useContext(SessionContext);
-    const stageSize = useContext(StageContext);
-
-    console.log(`Target(${target})`);
-    
+// Fetches the day-long alt/az/sun_alt timeseries for a target. Shared by
+// TargetPath (path rendering) and Target (upcoming-transitions tooltip) so
+// the two components' React Query cache entries are the same request.
+function useTargetPathData(target, pos, stageSize) {
     const renderTS = CalcRenderTS(stageSize);
-    
-    const { isPending, error, data } = useQuery({
+
+    // The datetime part of the query key is divided so that it has
+    // a half an hour granularity, so the one minute intervals for
+    // updating target object positions don't re-query the path data
+    // more of then than that.
+    return useQuery({
+	queryKey: ['targetPathData', target,
+		   Math.floor(renderTS / 1000 / 60 / 30)],
+	queryFn: async () => {
+	    const resp = await axios.post(
+		`//${window.location.hostname}:8081/api/get-obj-timeseries`,
+		{target: target, lat: pos.lat,
+		 lon: pos.lon, time: renderTS,
+		 timespan: "day"},
+		{timeout: 120 * 1000});
+	    return resp.data;
+	}
+    });
+}
+
+// Fetches the current alt/az/radius for a target.
+function useTargetPosition(target, pos, stageSize) {
+    const renderTS = CalcRenderTS(stageSize);
+    return useQuery({
 	queryKey: ['targetData', target, renderTS],
 	queryFn: async () => {
 	    const resp = await axios.post(
@@ -70,10 +143,23 @@ function Target({target, pos, fill="white"}) {
 	    return resp.data;
 	}
     });
+}
+
+// Component to plot the current position of the given target in the sky,
+// seen from the geographic location in the settings. Reports hover/tap
+// in and out via onHover(target|null|updaterFn) so that ObsStage can
+// render the tooltip itself as the last (topmost) element in the Layer,
+// rather than nested under whichever target happens to be hovered.
+function Target({target, pos, fill="white", onHover}) {
+    const stageSize = useContext(StageContext);
+
+    console.log(`Target(${target})`);
+
+    const { isPending, error, data } = useTargetPosition(target, pos, stageSize);
 
     if (error) { console.log(`error=${error}`)};
     if (isPending) { return null };
-    
+
     console.log(`Rendering object for ${target}`);
 
     // The real (artificially zoomed) radius is only used for sun
@@ -82,9 +168,45 @@ function Target({target, pos, fill="white"}) {
 		   y: stageSize.get("altToPx")(data.alt),
 		   radius: data.radius * stageSize.get("zoom")
                    * stageSize.get("moonzoom")}
- 
-    return (<ObsObject target={target} x={props.x} y={props.y}
-		       radius={props.radius}></ObsObject>)
+
+    return (<Group
+		onMouseEnter={(e) => {
+		    onHover(target);
+		    e.target.getStage().container().style.cursor = 'pointer';
+		}}
+		onMouseLeave={(e) => {
+		    onHover((prev) => prev === target ? null : prev);
+		    e.target.getStage().container().style.cursor = 'default';
+		}}
+		onTap={() => onHover((prev) => prev === target ? null : target)}>
+		<ObsObject target={target} x={props.x} y={props.y}
+			   radius={props.radius}></ObsObject>
+	    </Group>)
+};
+
+// Renders the tooltip for whichever target is currently hovered/tapped.
+// Rendered once by ObsStage as the last child of the Layer so it always
+// paints on top of every path and marker, regardless of which target it's
+// for (the Sun's path/labels are otherwise always drawn last).
+function HoveredTooltip({target, pos}) {
+    const stageSize = useContext(StageContext);
+    const posQ = useTargetPosition(target, pos, stageSize);
+    // React Query dedupes this against TargetPath's identical query for
+    // the same target, so this normally isn't an extra network request.
+    const pathQ = useTargetPathData(target, pos, stageSize);
+
+    if (posQ.isPending || posQ.error || pathQ.isPending || pathQ.error) {
+	return null;
+    }
+
+    const x = stageSize.get("azToPx")(posQ.data.az);
+    const y = stageSize.get("altToPx")(posQ.data.alt);
+    const transitions = findUpcomingTransitions(pathQ.data.series, pos, target);
+
+    return (<TargetTooltip target={target} alt={posQ.data.alt} az={posQ.data.az}
+			    x={x} y={y} transitions={transitions}
+			    pointerDirection={edgePointerDirection(x, stageSize)}>
+	    </TargetTooltip>);
 };
 
 // Component to plot the future path of a given target in the sky,
@@ -94,22 +216,6 @@ function TargetPath({target, pos}) {
     const stageSize = useContext(StageContext);
 
     console.log(`TargetPath(${target})`);
-    
-    function altToBrightness(elem) {
-	const alt = elem.sun_alt;
-	if (alt >= 0) return 4;
-	if (alt >= -6) return 3;
-	if (alt >= -12) return 2;
-	if (alt >= -18) return 1;
-	return 0;
-    };
-
-    function brightnessChangeToAlt(b1, b2) {
-	if (b1 == 0 || b2 == 0) return -18;
-	if (b1 == 1 || b2 == 1) return -12;
-	if (b1 == 4 || b2 == 4) return 0;
-	return -6;
-    }
 
     const brightnessToColor =
 	  ["black", "#0000C0", "#4040FF", "#8080FF", "yellow"];
@@ -125,30 +231,7 @@ function TargetPath({target, pos}) {
 		new Date(ts1.getTime() + ((ts2 - ts1) * d))];
     };
 
-    function checkObsWindow(alt, az) {
-	return (alt > pos.min_alt && alt < pos.max_alt &&
-		az > pos.min_az && az < pos.max_az);
-    };
-
-    const renderTS = CalcRenderTS(stageSize);
-
-    // The datetime part of the query key is divided so that it has
-    // a half an hour granularity, so the one minute intervals for
-    // updating target object positions don't re-query the path data
-    // more of then than that.
-    const { isPending, error, data } = useQuery({
-	queryKey: ['targetPathData', target,
-		   Math.floor(renderTS / 1000 / 60 / 30)],
-	queryFn: async () => {
-	    const resp = await axios.post(
-		`//${window.location.hostname}:8081/api/get-obj-timeseries`,
-		{target: target, lat: pos.lat,
-		 lon: pos.lon, time: renderTS,
-		 timespan: "day"},
-	    	{timeout: 120 * 1000});
-	    return resp.data;
-	}
-    });
+    const { isPending, error, data } = useTargetPathData(target, pos, stageSize);
 
     if (error) { console.log(`error=${error}`)};
     if (isPending) { return null };
@@ -195,7 +278,7 @@ function TargetPath({target, pos}) {
 	    data.series[elem].sun_alt);
 	ts = new Date(data.series[elem].ts);
 	brightness = altToBrightness(data.series[elem]);
-	vis = (target == "Sun") || checkObsWindow(data.series[elem].alt, data.series[elem].az);
+	vis = (target == "Sun") || checkObsWindow(pos, data.series[elem].alt, data.series[elem].az);
 
 	wrap = (prev_x != null && prev_x > x);
 	vis_change = (vis != null && prev_vis != null && vis != prev_vis);
@@ -380,18 +463,18 @@ function CoordGrid() {
 const ObsStage = () => {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
+    const [hoveredTarget, setHoveredTarget] = useState(null);
 
     stageSize.forEach((value, key) => {
 	console.log(`${key} = ${value}`);
     });
-    
-    if (session == null) {
-	console.log("session null, skip rendering contents");
-	return null;
-    }
 
+    // These queries must run unconditionally on every render (Rules of
+    // Hooks), so the session==null gating below happens after they're
+    // called; `enabled` keeps them from firing before there's a session.
     const posQ = useQuery({
 	queryKey: ["positions"],
+	enabled: session != null,
 	queryFn: async () => {
 	    const response = await axios.get('/api/positions');
 	    return response.data;
@@ -399,11 +482,17 @@ const ObsStage = () => {
 	})
     const searchQ = useQuery({
 	queryKey: ["searches"],
+	enabled: session != null,
 	queryFn: async () => {
 	    const response = await axios.get('/api/searches');
 	    return response.data;
 	    },
 	})
+
+    if (session == null) {
+	console.log("session null, skip rendering contents");
+	return null;
+    }
     if (posQ.isPending || searchQ.isPending) {
 	return null;
     };
@@ -422,15 +511,17 @@ const ObsStage = () => {
     const paths = search.TargetObjects.map(obj =>
 	<TargetPath target={obj.name} pos={pos}>
 	</TargetPath>)
-    
+
     const targets = search.TargetObjects.map(obj =>
-	<Target target={obj.name} pos={pos}>
+	<Target target={obj.name} pos={pos} onHover={setHoveredTarget}>
 	</Target>)
 
     // Construct the view of the sky. The elements later in the list are
     // drawn on top of the earlier ones, so we want the objects on
     // top of the paths except the sun path on top of everything but
     // the sun itself so that the illumination labels aren't obscured.
+    // The hover tooltip is rendered last of all, so it always sits above
+    // every path/marker no matter which target it belongs to.
     return (<Layer>
 		<CoordGrid>
 		</CoordGrid>
@@ -438,8 +529,11 @@ const ObsStage = () => {
 		{targets}
 		<TargetPath target="Sun" pos={pos}>
 		</TargetPath>
-		<Target pos={pos} target="Sun" fill="yellow">
+		<Target pos={pos} target="Sun" fill="yellow" onHover={setHoveredTarget}>
 		</Target>
+		{hoveredTarget &&
+		 <HoveredTooltip target={hoveredTarget} pos={pos}>
+		 </HoveredTooltip>}
 	    </Layer>
 	   )
 };
