@@ -8,7 +8,7 @@ import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
 	 Tag } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 import { altToBrightness, brightnessChangeToAlt, checkObsWindow,
-	 findUpcomingTransitions } from './transitions.jsx'
+	 findUpcomingTransitions, findNextTransition } from './transitions.jsx'
 
 // Artistic representations of solar system objects
 const objMap = new Map();
@@ -39,6 +39,20 @@ function fmtTime(ts) {
 const brightnessLabel = ["Night", "Astro twilight", "Nautical twilight",
 			  "Civil twilight", "Day"];
 
+// Shared tooltip box: a Konva Label/Tag/Text positioned at (x,y), used by
+// both TargetTooltip (marker hover) and SegmentTooltip (path hover).
+function InfoTooltip({x, y, lines, pointerDirection = "up", opacity = 0.9}) {
+    return (<Label x={x} y={y} opacity={opacity}>
+		<Tag fill="white" pointerDirection={pointerDirection}
+		     pointerHeight={8} pointerWidth={5} stroke="black"
+		     strokeWidth={1} lineJoin="round">
+		</Tag>
+		<Text fill="black" padding={4} align="left"
+		      fontFamily="Verdana" fontSize={11} text={lines.join("\n")}>
+		</Text>
+	    </Label>);
+}
+
 // Hover/tap tooltip for a target marker: name, current alt/az, and the
 // next upcoming brightness and visibility transitions. pointerDirection
 // defaults to centering the box above the marker, but the caller passes
@@ -46,7 +60,7 @@ const brightnessLabel = ["Night", "Astro twilight", "Nautical twilight",
 // away from the edge instead of clipping off it (see edgePointerDirection).
 function TargetTooltip({target, alt, az, x, y, transitions,
 			 pointerDirection = "up"}) {
-    const text = [
+    const lines = [
 	target,
 	`Alt ${alt.toFixed(1)}°  Az ${az.toFixed(1)}°`,
 	transitions.brightness
@@ -57,17 +71,26 @@ function TargetTooltip({target, alt, az, x, y, transitions,
 	    ? `${transitions.visibility.vis ? "Rises" : "Sets"} ` +
 	      `${fmtTime(transitions.visibility.ts)}`
 	    : "Visibility: no change"
-    ].join("\n");
+    ];
 
-    return (<Label x={x} y={y} opacity={0.9}>
-		<Tag fill="white" pointerDirection={pointerDirection}
-		     pointerHeight={8} pointerWidth={5} stroke="black"
-		     strokeWidth={1} lineJoin="round">
-		</Tag>
-		<Text fill="black" padding={4} align="left"
-		      fontFamily="Verdana" fontSize={11} text={text}>
-		</Text>
-	    </Label>);
+    return <InfoTooltip x={x} y={y} lines={lines} pointerDirection={pointerDirection}></InfoTooltip>;
+}
+
+// Hover/tap tooltip for a target path segment: name, the segment's
+// midpoint alt/az/time, and the single next transition (brightness or
+// visibility, whichever occurs sooner) from that point along the path.
+function SegmentTooltip({target, alt, az, ts, x, y, transition,
+			  pointerDirection = "up"}) {
+    const lines = [
+	target,
+	`${fmtTime(ts)}  Alt ${alt.toFixed(1)}°  Az ${az.toFixed(1)}°`,
+	transition == null ? "Next: no change"
+	    : transition.kind === 'brightness'
+	    ? `Next: ${brightnessLabel[transition.b]} ${fmtTime(transition.ts)}`
+	    : `${transition.vis ? "Rises" : "Sets"} ${fmtTime(transition.ts)}`
+    ];
+
+    return <InfoTooltip x={x} y={y} lines={lines} pointerDirection={pointerDirection}></InfoTooltip>;
 }
 
 // The tooltip box is centered on its anchor x for pointerDirection "up",
@@ -146,10 +169,13 @@ function useTargetPosition(target, pos, stageSize) {
 }
 
 // Component to plot the current position of the given target in the sky,
-// seen from the geographic location in the settings. Reports hover/tap
-// in and out via onHover(target|null|updaterFn) so that ObsStage can
-// render the tooltip itself as the last (topmost) element in the Layer,
-// rather than nested under whichever target happens to be hovered.
+// seen from the geographic location in the settings. Reports hover/tap in
+// and out via onHover({type:'target',target}|null|updaterFn) so that
+// ObsStage can render the tooltip itself as the last (topmost) element in
+// the Layer, rather than nested under whichever target happens to be
+// hovered. Shares the hover state (and its {type,...} shape) with
+// TargetPath's segment hover, so a marker tooltip and a segment tooltip
+// can never both be open at once.
 function Target({target, pos, fill="white", onHover}) {
     const stageSize = useContext(StageContext);
 
@@ -171,14 +197,17 @@ function Target({target, pos, fill="white", onHover}) {
 
     return (<Group
 		onMouseEnter={(e) => {
-		    onHover(target);
+		    onHover({type: 'target', target});
 		    e.target.getStage().container().style.cursor = 'pointer';
 		}}
 		onMouseLeave={(e) => {
-		    onHover((prev) => prev === target ? null : prev);
+		    onHover((prev) =>
+			(prev?.type === 'target' && prev.target === target) ? null : prev);
 		    e.target.getStage().container().style.cursor = 'default';
 		}}
-		onTap={() => onHover((prev) => prev === target ? null : target)}>
+		onTap={() => onHover((prev) =>
+		    (prev?.type === 'target' && prev.target === target) ? null
+		    : {type: 'target', target})}>
 		<ObsObject target={target} x={props.x} y={props.y}
 			   radius={props.radius}></ObsObject>
 	    </Group>)
@@ -209,9 +238,47 @@ function HoveredTooltip({target, pos}) {
 	    </TargetTooltip>);
 };
 
+// Renders the tooltip for whichever half-hour path segment is currently
+// hovered/tapped. Like HoveredTooltip, rendered once by ObsStage as the
+// last child of the Layer so it's always on top. startIndex is the
+// data.series index of the interval's first sample; the interval's
+// midpoint alt/az/time is the plain average of that sample and the next.
+function HoveredSegmentTooltip({target, startIndex, pos}) {
+    const stageSize = useContext(StageContext);
+    // React Query dedupes this against TargetPath's identical query for
+    // the same target, so this normally isn't an extra network request.
+    const pathQ = useTargetPathData(target, pos, stageSize);
+
+    if (pathQ.isPending || pathQ.error) {
+	return null;
+    }
+
+    const s1 = pathQ.data.series[startIndex];
+    const s2 = pathQ.data.series[startIndex + 1];
+    if (!s1 || !s2) {
+	// Covers the case where the date/time picker changes while a
+	// segment tooltip is open: the query can return a different day's
+	// (differently-shaped) series before startIndex is invalidated.
+	return null;
+    }
+
+    const alt = (s1.alt + s2.alt) / 2;
+    const az = (s1.az + s2.az) / 2;
+    const ts = new Date((new Date(s1.ts).getTime() + new Date(s2.ts).getTime()) / 2);
+    const x = stageSize.get("azToPx")(az);
+    const y = stageSize.get("altToPx")(alt);
+    const transition = findNextTransition(pathQ.data.series, pos, target, startIndex);
+
+    return (<SegmentTooltip target={target} alt={alt} az={az}
+			     ts={ts} x={x} y={y}
+			     transition={transition}
+			     pointerDirection={edgePointerDirection(x, stageSize)}>
+	    </SegmentTooltip>);
+};
+
 // Component to plot the future path of a given target in the sky,
 // seen from the geographic location in the settings.
-function TargetPath({target, pos}) {
+function TargetPath({target, pos, onHover}) {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
 
@@ -240,17 +307,25 @@ function TargetPath({target, pos}) {
     // being the brightness level 0-4 (day, civil, nautical
     // and astronomical twilight and full night)
     const outer_segments = [];
-    
+
     // Inner segments is a list of lists, this is just so that we
     // can break the discontinuity at 0/360 azimuth
     const inner_segments = [];
 
     const transition_events = [];
 
+    // One small (2-point) line per half-hour sample interval, entirely
+    // separate from outer/inner segments above: those are merged across
+    // many samples for smooth (tension) visual rendering, but hover
+    // tooltips are wanted at half-hour granularity, which a merged
+    // multi-hour band can't give. {points, startIndex} where startIndex
+    // is the data.series index of the interval's first sample.
+    const hit_segments = [];
+
     // Temporary arrays of points
     let outer_points = [];
     let inner_points = [];
-    
+
     // Previous values, comparing these to the latest values
     // is used to decide when point sequences are split into
     // the segments
@@ -260,18 +335,20 @@ function TargetPath({target, pos}) {
     let prev_ts = null;
     let prev_brightness = null;
     let prev_vis = null;
-    
+
     // Latest values pulled from the remote data
     let x = 0;
     let y = 0;
     let sy = 0;
     let ts = null;
+    let i = null;
     let brightness = null;
     let vis = null;
     let wrap = null;
     let vis_change = null;
-    
+
     for (const elem in data.series) {
+	i = Number(elem);
 	x = stageSize.get("azToPx")(data.series[elem].az);
 	y = stageSize.get("altToPx")(data.series[elem].alt);
 	sy = stageSize.get("altToPx")(
@@ -282,7 +359,14 @@ function TargetPath({target, pos}) {
 
 	wrap = (prev_x != null && prev_x > x);
 	vis_change = (vis != null && prev_vis != null && vis != prev_vis);
-	
+
+	if (prev_x != null && !wrap && !vis_change && vis) {
+	    // The interval from the previous sample to this one doesn't
+	    // cross a discontinuity and is visible throughout, so it's a
+	    // valid, single half-hour hover target.
+	    hit_segments.push({points: [prev_x, prev_y, x, y], startIndex: i - 1});
+	}
+
 	if (wrap || vis_change) {
 	    // This datapoint is crossing a discontinuity either at
 	    // az=360 or to/from observation window, break the currently
@@ -302,10 +386,10 @@ function TargetPath({target, pos}) {
 	    prev_brightness = null;
 	    prev_vis = null;
 	}
-	
+
 	inner_points.push(x);
 	inner_points.push(y);
-	
+
 	if (prev_brightness != null && prev_brightness != brightness) {
 	    // The path crossed a brightness limit, break it into
 	    // a separate segment marked with the brigness.
@@ -338,13 +422,13 @@ function TargetPath({target, pos}) {
 
     const outerSegs = outer_segments.filter(
 	seg => target == "Sun" || seg[0] < 4).map(seg =>
-	<Line points={seg[1]} strokeWidth={5} 
+	<Line points={seg[1]} strokeWidth={5}
 	      stroke={brightnessToColor[seg[0]]} tension={1}
 	      shadowColor={brightnessToColor[seg[0]]} shadowBlur={10}>
 	</Line>)
 
     const innerSegs = inner_segments.map(seg =>
-	<Line points={seg} strokeWidth={1} 
+	<Line points={seg} strokeWidth={1}
 	      stroke={target == "Sun" ? "yellow" : "white"} tension={1}>
 	</Line>)
 
@@ -356,7 +440,7 @@ function TargetPath({target, pos}) {
 		     pointerWidth={5} stroke="black" strokeWidth={1}>
 		</Tag>
 		<Text fill="black" padding={1} align="center"
-		      fontFamily="Verdana" fontSize={12} 
+		      fontFamily="Verdana" fontSize={12}
 		      text={["N", "AT", "NT", "CT", "D"][ev.b] + "\n" +
 			    String(ev.ts.getHours()).padStart(2, "0") + "\n" +
 			    String(ev.ts.getMinutes()).padStart(2, "0")}>
@@ -364,10 +448,35 @@ function TargetPath({target, pos}) {
 	    </Label>)
     }
 
+    // Invisible half-hour-interval hover targets, one Line per entry in
+    // hit_segments. Rendered last (after transitionEvs) so they take hit
+    // priority over everything else, including the Sun's persistent
+    // transition labels -- unlike a visible line, there's no harm in an
+    // invisible hit target winning over a label drawn on top of it.
+    const hitSegs = hit_segments.map(seg =>
+	<Line points={seg.points} strokeWidth={0} hitStrokeWidth={20}
+	      stroke="black"
+	      onMouseEnter={(e) => {
+		  onHover({type: 'segment', target, startIndex: seg.startIndex});
+		  e.target.getStage().container().style.cursor = 'pointer';
+	      }}
+	      onMouseLeave={(e) => {
+		  onHover((prev) =>
+		      (prev?.type === 'segment' && prev.target === target &&
+		       prev.startIndex === seg.startIndex) ? null : prev);
+		  e.target.getStage().container().style.cursor = 'default';
+	      }}
+	      onTap={() => onHover((prev) =>
+		  (prev?.type === 'segment' && prev.target === target &&
+		   prev.startIndex === seg.startIndex) ? null
+		  : {type: 'segment', target, startIndex: seg.startIndex})}>
+	</Line>)
+
     return (<>
 		{outerSegs}
 		{innerSegs}
 		{transitionEvs}
+		{hitSegs}
 	    </>);
 };
 
@@ -463,7 +572,10 @@ function CoordGrid() {
 const ObsStage = () => {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
-    const [hoveredTarget, setHoveredTarget] = useState(null);
+    // null | {type:'target', target} | {type:'segment', target, startIndex}
+    // -- unified so a marker tooltip and a path-segment tooltip can never
+    // both be open at once.
+    const [hovered, setHovered] = useState(null);
 
     stageSize.forEach((value, key) => {
 	console.log(`${key} = ${value}`);
@@ -509,11 +621,11 @@ const ObsStage = () => {
     const search = searchQ.data.find((i) => (i.name == session.search))
 
     const paths = search.TargetObjects.map(obj =>
-	<TargetPath target={obj.name} pos={pos}>
+	<TargetPath target={obj.name} pos={pos} onHover={setHovered}>
 	</TargetPath>)
 
     const targets = search.TargetObjects.map(obj =>
-	<Target target={obj.name} pos={pos} onHover={setHoveredTarget}>
+	<Target target={obj.name} pos={pos} onHover={setHovered}>
 	</Target>)
 
     // Construct the view of the sky. The elements later in the list are
@@ -527,13 +639,16 @@ const ObsStage = () => {
 		</CoordGrid>
 		{paths}
 		{targets}
-		<TargetPath target="Sun" pos={pos}>
+		<TargetPath target="Sun" pos={pos} onHover={setHovered}>
 		</TargetPath>
-		<Target pos={pos} target="Sun" fill="yellow" onHover={setHoveredTarget}>
+		<Target pos={pos} target="Sun" fill="yellow" onHover={setHovered}>
 		</Target>
-		{hoveredTarget &&
-		 <HoveredTooltip target={hoveredTarget} pos={pos}>
+		{hovered?.type === 'target' &&
+		 <HoveredTooltip target={hovered.target} pos={pos}>
 		 </HoveredTooltip>}
+		{hovered?.type === 'segment' &&
+		 <HoveredSegmentTooltip target={hovered.target} startIndex={hovered.startIndex} pos={pos}>
+		 </HoveredSegmentTooltip>}
 	    </Layer>
 	   )
 };
