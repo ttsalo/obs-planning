@@ -65,3 +65,18 @@ export function findUpcomingTransitions(series, pos, target) {
 
     return {brightness: nextBrightness, visibility: nextVisibility};
 }
+
+// Like findUpcomingTransitions, but starting from a given point along the
+// series rather than its start, and collapsed to the single next
+// transition (brightness or visibility, whichever happens sooner).
+export function findNextTransition(series, pos, target, fromIndex = 0) {
+    const {brightness, visibility} =
+	  findUpcomingTransitions(series.slice(fromIndex), pos, target);
+    if (brightness && (!visibility || brightness.ts <= visibility.ts)) {
+	return {kind: 'brightness', ...brightness};
+    }
+    if (visibility) {
+	return {kind: 'visibility', ...visibility};
+    }
+    return null;
+}
