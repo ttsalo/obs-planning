@@ -44,6 +44,31 @@ func TestHealth(t *testing.T) {
     assert.Equal(t, healthPassJSON + "\n", rec.Body.String())
 }
 
+func testConfig(t *testing.T, expected string) {
+    e := echo.New()
+    req := httptest.NewRequest(http.MethodGet, "/config", nil)
+    rec := httptest.NewRecorder()
+    c := e.NewContext(req, rec)
+
+    err := config(c)
+    if err != nil {
+	t.Fatal(err)
+    }
+
+    assert.Equal(t, http.StatusOK, rec.Code)
+    assert.Equal(t, expected + "\n", rec.Body.String())
+}
+
+func TestConfig(t *testing.T) {
+    t.Setenv("OBS_ASTRO_URL", "https://obs-astro-xyz.a.run.app")
+    testConfig(t, `{"astro_url":"https://obs-astro-xyz.a.run.app"}`)
+}
+
+func TestConfigUnset(t *testing.T) {
+    t.Setenv("OBS_ASTRO_URL", "")
+    testConfig(t, `{"astro_url":""}`)
+}
+
 func testLogin(t *testing.T, body string, status int) {
     e := echo.New()
     req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(

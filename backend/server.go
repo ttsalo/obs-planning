@@ -119,13 +119,27 @@ func health(c echo.Context) error {
     return c.JSON(http.StatusOK, r)
 }
 
+type ConfigReply struct {
+    AstroUrl string `json:"astro_url"`
+}
+
+/* Runtime configuration for the frontend, fetched once at startup
+(before login, so this must stay unauthenticated). An empty astro_url
+means the frontend falls back to //<host>:8081 (local and AWS
+deployments); Cloud Run sets OBS_ASTRO_URL to the astro service URL. */
+func config(c echo.Context) error {
+    return c.JSON(http.StatusOK, &ConfigReply{
+	AstroUrl: os.Getenv("OBS_ASTRO_URL")})
+}
+
 func main() {
     var DB *gorm.DB
-    
+
     e := echo.New()
     e.Debug = true
-    
+
     e.GET("/health", health)
+    e.GET("/config", config)
     e.Static("/", "static")
 
     // Everything under /api required authentication, 

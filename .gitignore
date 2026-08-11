@@ -4,4 +4,5 @@ backend/repository.json
 backend/server
 backend/static/*
 obs_ecs/cdk.context.json
+gcp-db.env
 *~

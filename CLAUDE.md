@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Graphical astronomical observations planner. Three-tier app: React frontend, Go API + static server, Python (astropy) astronomy calculation server, PostgreSQL database. Runs via `docker compose` locally, deploys to AWS ECS Fargate via CDK.
+Graphical astronomical observations planner. Three-tier app: React frontend, Go API + static server, Python (astropy) astronomy calculation server, PostgreSQL database. Runs via `docker compose` locally, deploys to AWS ECS Fargate via CDK or to Google Cloud Run via `gcloud`-based Make targets.
 
 ## Common commands
 
@@ -14,6 +14,7 @@ All top-level commands are Make targets in the root `Makefile`; each subproject 
 - `make check` — run all three test suites sequentially: UI (`npm run build`, lint is currently commented out), Go (`go test -v`), Python (`pytest` inside `.astrovenv`).
 - `make runserver` — `make build` then `docker compose up`. Requires `OBS_DB_PASSWORD` to be exported. Local dev cycle is Ctrl-C then re-run.
 - `make aws-push` / `make aws-cleanup` — create/delete ECR repos for both backends, build & tag images, push. Writes `backend/repository.json` and `astrobackend/repository.json` (gitignored); the CDK stack reads these files at synth time, so `aws-push` must run before `cdk synth`.
+- `make gcp-push` / `make gcp-deploy` / `make gcp-destroy` / `make gcp-cleanup` — build & push images to Artifact Registry, deploy/delete both Cloud Run services, delete the Artifact Registry repo. Require `GCP_PROJECT` exported and a gitignored `gcp-db.env` at the repo root (non-secret Aiven params: `OBS_DB_HOST/PORT/USER/NAME`); one-time project/secret setup is in the README. `gcp-deploy` deploys astro first because the backend deploy looks up the astro service URL for `OBS_ASTRO_URL`. GCP settings (region `europe-north1`, repo/service names) live in `defines.mk`.
 - `make docker-cleanup` — `docker system prune`.
 
 Running a single test:
@@ -24,6 +25,8 @@ The Python venv (`astrobackend/.astrovenv`) must be created manually once via `p
 
 Ports: 8080 = Go backend + frontend, 8081 = Python astrobackend. Both are exposed directly to the browser (the Go server does not proxy astronomy calls).
 
+Astro-backend discovery: the frontend fetches the unauthenticated `GET /config` on the Go server once at startup (`obs-ui/src/config.jsx`); if `OBS_ASTRO_URL` is set (Cloud Run), astro calls go to that base URL, otherwise the frontend falls back to `//<host>:8081` (local and AWS).
+
 ## Architecture
 
 ### Two-server split
@@ -31,7 +34,7 @@ The frontend talks to two separate origins from the browser:
 - `/api/*` and `/login` on the same host (Go / Echo) — session, auth, DB-backed positions and searches.
 - `//<host>:8081/api/*` (Python / Flask + astropy) — astronomy calculations (`/api/get-obj`, `/api/get-obj-timeseries`). Because these are cross-origin, `astrobackend/server.py` adds CORS headers in `after_request` and handles preflight `OPTIONS` in `before_request`.
 
-The split exists so heavy astropy work doesn't block the primary server and the two can scale independently. In AWS, both run behind a single ALB on different listener ports (80 and 8081), configured in `obs_ecs/obs_ecs/obs_ecs_stack.py`.
+The split exists so heavy astropy work doesn't block the primary server and the two can scale independently. In AWS, both run behind a single ALB on different listener ports (80 and 8081), configured in `obs_ecs/obs_ecs/obs_ecs_stack.py`. On Cloud Run the astro backend is a separate `https://` service on its own hostname, discovered via `/config` (see above); the CORS handling in `server.py` reflects any Origin, so the cross-origin `run.app` calls work unchanged.
 
 ### Auth and session
 - `POST /login` (unauthenticated) returns a JWT signed with the hard-coded HMAC secret `"secret"` in `backend/api.go`. The token payload is just `{username}`.
@@ -71,11 +74,14 @@ Single stack: VPC, ECS cluster, two Fargate task definitions. Postgres is extern
 
 Both `backend/repository.json` and `astrobackend/repository.json` must exist (created by `make aws-push` or `make -C {backend,astrobackend} create-repository`) before running `cdk synth` — the stack reads them to resolve the ECR repository ARNs. The `obs-planning/aiven-pg` secret must also exist before `cdk deploy`; see the README for the `aws secretsmanager create-secret` command.
 
+### Google Cloud Run deployment
+No IaC stack — plain `gcloud` commands in the Makefiles (`gcp-*` targets in the root, `backend/` and `astrobackend/` Makefiles). Same Aiven Postgres as AWS, reached over public TLS (`OBS_DB_SSLMODE=require`); the password comes from the GCP Secret Manager secret `obs-db-password` via `--set-secrets`, the other `OBS_DB_*` params from `gcp-db.env` as plain env vars. The astro container doesn't need DB access. `gcloud run deploy` is create-or-update, so there is no repository.json-style state. Ports: backend deploys with `--port 80` (matches the Go server's default; it reads `OBS_SERVER_PORT`, not Cloud Run's `PORT`), astro with `--port 8000` (gunicorn's default bind — the exec-form CMD would not expand `$PORT`). Astro gets `--memory 2Gi` per the gunicorn sizing constraint below and `--timeout 120` to match the frontend's axios timeout. Both services scale to zero (`--min-instances 0`); astro cold starts are several seconds because `--preload` imports astropy before the port opens.
+
 ## Conventions
 
 - Editor backup files (`*~`) are `.gitignore`d but visible in `ls`; ignore them.
 - Version bumps live in the top-level `VERSION` file and are mirrored in the README's Versions section.
-- Environment variables the code reads: `OBS_DB_HOST`, `OBS_DB_USER`, `OBS_DB_PASSWORD`, `OBS_DB_NAME`, `OBS_DB_PORT`, `OBS_DB_SSLMODE` (Go server; the SSL mode defaults to `disable` locally and is set to `require` in the CDK stack for Aiven); `OBS_SERVER_PORT` (optional override, defaults to 80).
+- Environment variables the code reads: `OBS_DB_HOST`, `OBS_DB_USER`, `OBS_DB_PASSWORD`, `OBS_DB_NAME`, `OBS_DB_PORT`, `OBS_DB_SSLMODE` (Go server; the SSL mode defaults to `disable` locally and is set to `require` in the CDK stack and the Cloud Run deploy for Aiven); `OBS_SERVER_PORT` (optional override, defaults to 80); `OBS_ASTRO_URL` (Go server; served to the browser via the unauthenticated `/config` endpoint — unset means the frontend uses the `//<host>:8081` fallback).
 - Container stdout/stderr in AWS is captured to CloudWatch under stream prefixes `obs-backend` (Go) and `obs-astro` (Python) with 14-day retention. Tail live: `aws logs tail /aws/ecs/<generated-name> --follow --since 5m --region eu-north-1`; find the exact log-group name in `cdk synth` output or the ECS console. The astro server has a global Flask `@app.errorhandler(Exception)` that emits `unhandled-exception id=<8-hex> path=... json=... traceback=...`, plus a targeted `astro-timeseries-fail target=... lat=... lon=... time=...` line for `/api/get-obj-timeseries`; grep for those prefixes when a 500 needs diagnosing.
 - Astropy IERS auto-download is disabled at astrobackend module load (`iers.conf.auto_download = False`, `iers_degraded_accuracy = "ignore"`). Polar-motion values come from the bundled IERS_B table; positions are accurate to arcseconds, not milliarcseconds — fine for the sky renderer. Do not re-enable without pre-fetching IERS_A at build time, or the CDS-parse cost on the first request will blow past the gunicorn worker timeout (this was OBS-6's cause).
 - Astro gunicorn runs with `-w 2 --preload --max-requests 100 --max-requests-jitter 20 --timeout 60` on `memory_limit_mib=1792`. Fewer workers plus CoW page-sharing from `--preload` keep total RSS under the container ceiling despite astropy's per-worker footprint; the ceiling reflects most of the task's 2 GiB (leaving overhead). Raising the worker count without also raising the container's memory limit is what put the OOM killer in play.

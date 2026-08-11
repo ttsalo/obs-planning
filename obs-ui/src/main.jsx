@@ -8,15 +8,18 @@ import {
 import './index.css'
 import App from './App.jsx'
 import LoginPage from './login.jsx'
+import { RuntimeConfigProvider } from './config.jsx'
 
 const queryClient = new QueryClient();
 
 createRoot(document.getElementById('root')).render(
     <StrictMode>
 	<QueryClientProvider client={queryClient}>
-	    <LoginPage>
-		<App />
-	    </LoginPage>
+	    <RuntimeConfigProvider>
+		<LoginPage>
+		    <App />
+		</LoginPage>
+	    </RuntimeConfigProvider>
 	</QueryClientProvider>
     </StrictMode>,
 )
