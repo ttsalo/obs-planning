@@ -224,10 +224,14 @@ Link a billing account to the new project in the Cloud console
 
 ```
 gcloud config set project <project-id>
-export GCP_PROJECT=<project-id>
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
 gcloud artifacts repositories create obs-planner --repository-format docker --location europe-north1
 ```
+
+The Make targets below use the project configured here; export
+`GCP_PROJECT=<project-id>` only if you want to override it (for
+example to deploy to a second project without switching the gcloud
+default).
 
 (No `gcloud auth configure-docker` needed: `make gcp-push` logs docker
 into Artifact Registry with an access token on every push, same as the
@@ -241,7 +245,7 @@ Cloud Run runtime service account to read it:
 printf '%s' "$OBS_DB_PASSWORD" | gcloud secrets create obs-db-password --data-file=-
 gcloud secrets add-iam-policy-binding obs-db-password \
   --role roles/secretmanager.secretAccessor \
-  --member "serviceAccount:$(gcloud projects describe $GCP_PROJECT --format 'value(projectNumber)')-compute@developer.gserviceaccount.com"
+  --member "serviceAccount:$(gcloud projects describe $(gcloud config get-value project) --format 'value(projectNumber)')-compute@developer.gserviceaccount.com"
 ```
 
 Finally, create a `gcp-db.env` file at the repo root (gitignored) with
@@ -257,8 +261,8 @@ OBS_DB_NAME=defaultdb
 
 ## Deployment cycle in Google Cloud Run
 
-Requirements: one-time setup above done, `GCP_PROJECT` exported and
-`gcp-db.env` present.
+Requirements: one-time setup above done and `gcp-db.env` present. The
+project comes from `gcloud config`; `GCP_PROJECT` overrides it.
 
 Build the UI and both images and push them to Artifact Registry
 (on an arm64 host add `--platform linux/amd64` to the docker builds):

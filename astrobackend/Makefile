@@ -41,14 +41,14 @@ gcp-push:
 # --timeout 120 matches the frontend's axios timeout (gunicorn's own
 # --timeout 60 remains the effective per-request cap).
 gcp-deploy:
-	gcloud run deploy $(GCP_ASTRO_SERVICE) \
+	gcloud run deploy $(GCP_ASTRO_SERVICE) --project $(GCP_PROJECT) \
 	  --image $(GCP_IMAGE) --region $(GCP_REGION) \
 	  --allow-unauthenticated --port 8000 \
 	  --memory 2Gi --cpu 1 --min-instances 0 --max-instances 2 \
 	  --timeout 120
 
 gcp-destroy:
-	gcloud run services delete $(GCP_ASTRO_SERVICE) --region $(GCP_REGION) --quiet
+	gcloud run services delete $(GCP_ASTRO_SERVICE) --project $(GCP_PROJECT) --region $(GCP_REGION) --quiet
 
 update-reqs:
 	(source .astrovenv/bin/activate; pip-compile)

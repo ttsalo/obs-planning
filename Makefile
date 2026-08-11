@@ -40,7 +40,7 @@ gcp-destroy:
 # Deletes the Artifact Registry repo (billable storage); symmetric
 # with aws-cleanup.
 gcp-cleanup:
-	gcloud artifacts repositories delete $(GCP_REPOSITORY) --location $(GCP_REGION) --quiet
+	gcloud artifacts repositories delete $(GCP_REPOSITORY) --project $(GCP_PROJECT) --location $(GCP_REGION) --quiet
 
 docker-cleanup:
 	docker system prune
