@@ -151,6 +151,40 @@ func main() {
     
     envp := os.Getenv("OBS_SERVER_PORT")
 
+    // Seed the test data and register the DB-backed endpoints once a
+    // connection is available.
+    setupDB := func(db *gorm.DB) {
+	err := InitTestData(e, db)
+	if err != nil {
+	    e.Logger.Fatal(err.Error())
+	}
+	RegisterDBEndpoints(e, r, db)
+    }
+
+    // Connect to database in a separate goroutine so that delay (or
+    // failure) in connecting to db doesn't prevent non-db endpoints
+    // from going up (/health for example)
+    db_chan := make(chan *gorm.DB)
+    retries := 0
+    go ConnectDB(db_chan)
+
+    // On Cloud Run the container only has guaranteed CPU until its
+    // port opens, and requests are routed as soon as it does, so the
+    // listen-first startup below would serve 405s for /login and the
+    // /api endpoints while they are still unregistered — and the
+    // throttled CPU makes that window long. With OBS_WAIT_DB set (the
+    // Cloud Run deploy sets it), wait for the first connection attempt
+    // and register the DB endpoints before the listener starts; Cloud
+    // Run holds incoming requests until the port opens. A failed first
+    // attempt falls through to the retry loop below.
+    if os.Getenv("OBS_WAIT_DB") != "" {
+	if DB = <-db_chan; DB != nil {
+	    setupDB(DB)
+	} else {
+	    e.Logger.Error("Failed to connect to DB: ", DB_err)
+	}
+    }
+
     // Run echo server in a separate goroutine so that we can perform
     // other actions in the main thread
     go func() {
@@ -160,13 +194,6 @@ func main() {
 	    e.Logger.Fatal(e.Start(":80"))
 	}
     }()
-
-    // Connect to database in a separate goroutine so that delay (or
-    // failure) in connecting to db doesn't prevent non-db endpoints
-    // from going up (/health for example)
-    db_chan := make(chan *gorm.DB)
-    retries := 0
-    go ConnectDB(db_chan)
 
     // This provides periodic log events from the server process and
     // also implements a couple of retries for connecting to the database
@@ -184,11 +211,7 @@ func main() {
 	    }
 	case DB = <-db_chan:
 	    if DB != nil {
-		err := InitTestData(e, DB)
-		if err != nil {
-		    e.Logger.Fatal(err.Error())
-		}
-		RegisterDBEndpoints(e, r, DB)
+		setupDB(DB)
 	    } else {
 		e.Logger.Error("Failed to connect to DB: ", DB_err)
 	    }

@@ -44,7 +44,7 @@ gcp-deploy:
 	  --image $(GCP_IMAGE) --region $(GCP_REGION) \
 	  --allow-unauthenticated --port 80 \
 	  --memory 1Gi --cpu 1 --min-instances 0 --max-instances 2 \
-	  --set-env-vars "OBS_ASTRO_URL=$$(gcloud run services describe $(GCP_ASTRO_SERVICE) --region $(GCP_REGION) --format 'value(status.url)'),OBS_DB_HOST=$(OBS_DB_HOST),OBS_DB_PORT=$(OBS_DB_PORT),OBS_DB_USER=$(OBS_DB_USER),OBS_DB_NAME=$(OBS_DB_NAME),OBS_DB_SSLMODE=require" \
+	  --set-env-vars "OBS_ASTRO_URL=$$(gcloud run services describe $(GCP_ASTRO_SERVICE) --region $(GCP_REGION) --format 'value(status.url)'),OBS_DB_HOST=$(OBS_DB_HOST),OBS_DB_PORT=$(OBS_DB_PORT),OBS_DB_USER=$(OBS_DB_USER),OBS_DB_NAME=$(OBS_DB_NAME),OBS_DB_SSLMODE=require,OBS_WAIT_DB=1" \
 	  --set-secrets "OBS_DB_PASSWORD=obs-db-password:latest"
 
 gcp-destroy:
