@@ -7,6 +7,7 @@ import Konva from 'konva';
 import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
 	 Tag } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
+import { useAstroBase } from './config.jsx'
 import { altToBrightness, brightnessChangeToAlt, checkObsWindow,
 	 findUpcomingTransitions, findNextTransition } from './transitions.jsx'
 
@@ -132,6 +133,7 @@ function CalcRenderTS(stageSize) {
 // the two components' React Query cache entries are the same request.
 function useTargetPathData(target, pos, stageSize) {
     const renderTS = CalcRenderTS(stageSize);
+    const astroBase = useAstroBase();
 
     // The datetime part of the query key is divided so that it has
     // a half an hour granularity, so the one minute intervals for
@@ -142,7 +144,7 @@ function useTargetPathData(target, pos, stageSize) {
 		   Math.floor(renderTS / 1000 / 60 / 30)],
 	queryFn: async () => {
 	    const resp = await axios.post(
-		`//${window.location.hostname}:8081/api/get-obj-timeseries`,
+		`${astroBase}/api/get-obj-timeseries`,
 		{target: target, lat: pos.lat,
 		 lon: pos.lon, time: renderTS,
 		 timespan: "day"},
@@ -155,11 +157,12 @@ function useTargetPathData(target, pos, stageSize) {
 // Fetches the current alt/az/radius for a target.
 function useTargetPosition(target, pos, stageSize) {
     const renderTS = CalcRenderTS(stageSize);
+    const astroBase = useAstroBase();
     return useQuery({
 	queryKey: ['targetData', target, renderTS],
 	queryFn: async () => {
 	    const resp = await axios.post(
-		`//${window.location.hostname}:8081/api/get-obj`,
+		`${astroBase}/api/get-obj`,
 		{target: target, lat: pos.lat,
 		 lon: pos.lon, time: renderTS},
 		{timeout: 120 * 1000});

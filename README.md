@@ -59,6 +59,15 @@ visible (dark enough).
 
 ![screenshot](examples/screenshot3.png)
 
+### 0.9.0
+
+Google Cloud Run deployment support (`make gcp-push`, `make gcp-deploy`,
+`make gcp-destroy`). The astro backend base URL is now delivered to the
+frontend at runtime via the new unauthenticated `/config` endpoint
+(`OBS_ASTRO_URL` env var on the Go server); when unset the frontend
+falls back to the previous `//<host>:8081` behavior, so local and AWS
+deployments are unchanged.
+
 ## Next steps
 
 - On-hover infobox for the objects
@@ -73,7 +82,7 @@ visible (dark enough).
   keep the primary server responsive even if the secondary is handling
   a lot of heavy calculations and to allow differential resource scaling.
 - Running locally with docker compose
-- Easy deployment to AWS ECS
+- Easy deployment to AWS ECS or Google Cloud Run
 
 # Setup (docker as root, others as user)
 - Install AWS CLI and set up SSO
@@ -199,6 +208,86 @@ cdk synth
 cdk deploy
 cdk destroy
 ```
+
+## Set up Google Cloud (one-time)
+
+Requires the gcloud CLI, installed and authenticated (`gcloud auth login`).
+
+Create the project and enable the needed services:
+
+```
+gcloud projects create <project-id>
+```
+
+Link a billing account to the new project in the Cloud console
+(Billing -> Link a billing account) before continuing.
+
+```
+gcloud config set project <project-id>
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
+gcloud artifacts repositories create obs-planner --repository-format docker --location europe-north1
+```
+
+The Make targets below use the project configured here; export
+`GCP_PROJECT=<project-id>` only if you want to override it (for
+example to deploy to a second project without switching the gcloud
+default).
+
+(No `gcloud auth configure-docker` needed: `make gcp-push` logs docker
+into Artifact Registry with an access token on every push, same as the
+ECR login in `aws-push`. The credential-helper route doesn't work with
+a snap-installed docker, which can't exec `docker-credential-gcloud`.)
+
+Store the Aiven database password in Secret Manager and allow the
+Cloud Run runtime service account to read it:
+
+```
+printf '%s' "$OBS_DB_PASSWORD" | gcloud secrets create obs-db-password --data-file=-
+gcloud secrets add-iam-policy-binding obs-db-password \
+  --role roles/secretmanager.secretAccessor \
+  --member "serviceAccount:$(gcloud projects describe $(gcloud config get-value project) --format 'value(projectNumber)')-compute@developer.gserviceaccount.com"
+```
+
+Finally, create a `gcp-db.env` file at the repo root (gitignored) with
+the non-secret Aiven connection details, from the same Aiven service
+overview page the AWS deployment uses:
+
+```
+OBS_DB_HOST=<pg-xxx.aivencloud.com>
+OBS_DB_PORT=<Aiven port>
+OBS_DB_USER=avnadmin
+OBS_DB_NAME=defaultdb
+```
+
+## Deployment cycle in Google Cloud Run
+
+Requirements: one-time setup above done and `gcp-db.env` present. The
+project comes from `gcloud config`; `GCP_PROJECT` overrides it.
+
+Build the UI and both images and push them to Artifact Registry
+(on an arm64 host add `--platform linux/amd64` to the docker builds):
+
+`make gcp-push`
+
+Deploy or update both Cloud Run services (astro first — the backend
+deploy looks up the astro service URL and passes it as `OBS_ASTRO_URL`,
+which the frontend fetches via `/config`):
+
+`make gcp-deploy`
+
+The app is reachable at the obs-backend service URL printed by the
+deploy. Both services scale to zero when idle, so the first request
+after an idle period has a cold-start delay (largest for the astro
+service).
+
+Delete the services when no longer needed:
+
+`make gcp-destroy`
+
+The Artifact Registry repository is billable storage; delete it too
+when no longer needed:
+
+`make gcp-cleanup`
 
 ## Local postgres setup (optional)
 

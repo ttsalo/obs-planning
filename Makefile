@@ -22,6 +22,26 @@ aws-cleanup:
 	make -C backend delete-repository
 	make -C astrobackend delete-repository
 
+gcp-push: build
+	make -C backend gcp-build gcp-push
+	make -C astrobackend gcp-build gcp-push
+
+# Astro first: the backend deploy looks up the astro service URL for
+# OBS_ASTRO_URL, so the astro service must exist before the backend
+# is (re)deployed.
+gcp-deploy:
+	make -C astrobackend gcp-deploy
+	make -C backend gcp-deploy
+
+gcp-destroy:
+	-make -C backend gcp-destroy
+	-make -C astrobackend gcp-destroy
+
+# Deletes the Artifact Registry repo (billable storage); symmetric
+# with aws-cleanup.
+gcp-cleanup:
+	gcloud artifacts repositories delete $(GCP_REPOSITORY) --project $(GCP_PROJECT) --location $(GCP_REGION) --quiet
+
 docker-cleanup:
 	docker system prune
 

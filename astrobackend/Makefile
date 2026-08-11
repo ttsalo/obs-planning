@@ -26,6 +26,30 @@ create-repository:
 delete-repository:
 	aws ecr delete-repository --repository-name $(AWS_ASTRO_REPOSITORY) --region $(AWS_REGION) --force
 
+GCP_IMAGE=$(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/$(GCP_REPOSITORY)/obs-planner-astroserver
+
+gcp-build: test
+	docker build -t obs-planner-astroserver .
+
+gcp-push:
+	gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin $(GCP_REGION)-docker.pkg.dev
+	docker tag obs-planner-astroserver $(GCP_IMAGE)
+	docker push $(GCP_IMAGE)
+
+# --port 8000 matches gunicorn's default bind (the exec-form CMD does
+# not expand $PORT). Memory 2Gi per the documented worker sizing;
+# --timeout 120 matches the frontend's axios timeout (gunicorn's own
+# --timeout 60 remains the effective per-request cap).
+gcp-deploy:
+	gcloud run deploy $(GCP_ASTRO_SERVICE) --project $(GCP_PROJECT) \
+	  --image $(GCP_IMAGE) --region $(GCP_REGION) \
+	  --allow-unauthenticated --port 8000 \
+	  --memory 2Gi --cpu 1 --min-instances 0 --max-instances 2 \
+	  --timeout 120
+
+gcp-destroy:
+	gcloud run services delete $(GCP_ASTRO_SERVICE) --project $(GCP_PROJECT) --region $(GCP_REGION) --quiet
+
 update-reqs:
 	(source .astrovenv/bin/activate; pip-compile)
 

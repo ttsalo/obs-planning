@@ -6,11 +6,14 @@ import dayjs from 'dayjs';
 import axios from 'axios';
 import ObsStage from './obs.jsx';
 import { SessionContext, StageContext, updateSession } from './session.jsx'
+import { useAstroBase } from './config.jsx'
 
 const App = () => {
     // Global session context. This is a bit special state since it's
     // set by reading or writing it to server side for persistence.
     const [session, setSession] = useState(null);
+
+    const astroBase = useAstroBase();
 
     useEffect(() => {
 	const fetchData = async () => {
@@ -293,11 +296,11 @@ const App = () => {
 			     style={{ height: '100%' }}>
 			   <Space>
 			   © Tomi T. Salo 2025-2026
-			   <a href={`http://${window.location.hostname}:8081/apidocs/`}>
+			   <a href={`${astroBase}/apidocs/`}>
 			   Apidoc (astro)</a>
-			   <a href={`http://${window.location.hostname}/health`}>
+			   <a href="/health">
 			   Backend health</a>
-			   <a href={`http://${window.location.hostname}:8081/health`}>
+			   <a href={`${astroBase}/health`}>
 			   Astrobackend health</a>
 			   </Space>
 		       </Flex>
