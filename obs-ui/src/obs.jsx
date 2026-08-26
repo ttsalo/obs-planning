@@ -5,7 +5,7 @@ import {
 } from '@tanstack/react-query'
 import Konva from 'konva';
 import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
-	 Tag } from 'react-konva';
+	 Tag, Shape } from 'react-konva';
 import { SessionContext, StageContext } from './session.jsx'
 import { useAstroBase } from './config.jsx'
 import { altToBrightness, brightnessChangeToAlt, checkObsWindow,
@@ -23,13 +23,57 @@ objMap.set("Saturn", {fill: "peachpuff", radius: 5.8});
 objMap.set("Uranus", {fill: "lightskyblue", radius: 5});
 objMap.set("Neptune", {fill: "cornflowerblue", radius: 5});
 
-// Draw the representation of a given object. 
-function ObsObject({target, x, y, radius}) {
+// Shared outline width for all object markers, so the moon (whose outline
+// is a separate stroke-only circle on top of the phase shapes) matches the
+// plain filled-circle objects exactly.
+const objStrokeWidth = 1.2;
+
+// Draw the representation of a given object. When phase data is present
+// (moon only), the disc is split into a dark base circle and a lit region
+// whose flat side is the terminator, rotated so the bright limb faces the
+// sun's position on the sky.
+function ObsObject({target, x, y, radius, phase = null, alt = 0}) {
     const obj = objMap.get(target);
     if (!obj) return null;
-    return (<Circle fill={obj.fill} stroke="black" strokeWidth={1.5}
-		    x={x} y={y} radius={obj.radius || radius}>
-	    </Circle>)
+    if (phase == null) {
+	return (<Circle fill={obj.fill} stroke="black"
+			strokeWidth={objStrokeWidth}
+			x={x} y={y} radius={obj.radius || radius}>
+		</Circle>)
+    }
+
+    const r = obj.radius || radius;
+    // The backend angle is a true sky bearing; the plate-carrée canvas
+    // stretches azimuth by 1/cos(alt), so correct the bearing before
+    // using it as a rotation (~12° visible error at alt 55° otherwise).
+    const chi = phase.angle * Math.PI / 180;
+    const cosAlt = Math.max(Math.cos(alt * Math.PI / 180), 0.05);
+    const screenAngle = Math.atan2(Math.sin(chi) / cosAlt,
+				   Math.cos(chi)) * 180 / Math.PI;
+    const c = 2 * phase.k - 1;  // signed terminator semi-minor fraction
+
+    return (<Group x={x} y={y} rotation={screenAngle}>
+		<Circle x={0} y={0} radius={r} fill="#3a3a44">
+		</Circle>
+		<Shape fill={obj.fill}
+		       sceneFunc={(ctx, shape) => {
+			   ctx.beginPath();
+			   // Bright limb points up (-y) in this unrotated
+			   // frame: upper semicircle from (-r,0) to (r,0).
+			   ctx.arc(0, 0, r, Math.PI, 2 * Math.PI, false);
+			   // Terminator half-ellipse back to (-r,0):
+			   // gibbous (c>0) bulges into the dark side,
+			   // crescent (c<0) into the bright side.
+			   ctx.ellipse(0, 0, r, Math.abs(c) * r, 0,
+				       0, Math.PI, c < 0);
+			   ctx.closePath();
+			   ctx.fillStrokeShape(shape);
+		       }}>
+		</Shape>
+		<Circle x={0} y={0} radius={r} stroke="black"
+			strokeWidth={objStrokeWidth} fillEnabled={false}>
+		</Circle>
+	    </Group>)
 }
 
 function fmtTime(ts) {
@@ -39,6 +83,17 @@ function fmtTime(ts) {
 
 const brightnessLabel = ["Night", "Astro twilight", "Nautical twilight",
 			  "Civil twilight", "Day"];
+
+// Conventional phase name from the illuminated fraction and the waxing
+// flag, both provided by the astro backend for the moon.
+function moonPhaseLabel(illumination, waxing) {
+    if (illumination <= 0.02) return "New moon";
+    if (illumination >= 0.98) return "Full moon";
+    if (illumination >= 0.45 && illumination <= 0.55)
+	return waxing ? "First quarter" : "Last quarter";
+    if (illumination < 0.5) return waxing ? "Waxing crescent" : "Waning crescent";
+    return waxing ? "Waxing gibbous" : "Waning gibbous";
+}
 
 // Shared tooltip box: a Konva Label/Tag/Text positioned at (x,y), used by
 // both TargetTooltip (marker hover) and SegmentTooltip (path hover).
@@ -54,16 +109,21 @@ function InfoTooltip({x, y, lines, pointerDirection = "up", opacity = 0.9}) {
 	    </Label>);
 }
 
-// Hover/tap tooltip for a target marker: name, current alt/az, and the
-// next upcoming brightness and visibility transitions. pointerDirection
+// Hover/tap tooltip for a target marker: name, current alt/az, the moon
+// phase (moon only, when the backend provides it), and the next upcoming
+// brightness and visibility transitions. pointerDirection
 // defaults to centering the box above the marker, but the caller passes
 // "left"/"right" near the edges of the visible area so the box is anchored
 // away from the edge instead of clipping off it (see edgePointerDirection).
-function TargetTooltip({target, alt, az, x, y, transitions,
+function TargetTooltip({target, alt, az, x, y, transitions, phase = null,
 			 pointerDirection = "up"}) {
     const lines = [
 	target,
 	`Alt ${alt.toFixed(1)}°  Az ${az.toFixed(1)}°`,
+	...(phase != null
+	    ? [`Phase: ${Math.round(phase.illumination * 100)}% ` +
+	       moonPhaseLabel(phase.illumination, phase.waxing)]
+	    : []),
 	transitions.brightness
 	    ? `Next: ${brightnessLabel[transitions.brightness.b]} ` +
 	      `${fmtTime(transitions.brightness.ts)}`
@@ -212,7 +272,11 @@ function Target({target, pos, fill="white", onHover}) {
 		    (prev?.type === 'target' && prev.target === target) ? null
 		    : {type: 'target', target})}>
 		<ObsObject target={target} x={props.x} y={props.y}
-			   radius={props.radius}></ObsObject>
+			   radius={props.radius} alt={data.alt}
+			   phase={data.illumination != null
+				  ? {k: data.illumination,
+				     angle: data.bright_limb_angle}
+				  : null}></ObsObject>
 	    </Group>)
 };
 
@@ -235,8 +299,14 @@ function HoveredTooltip({target, pos}) {
     const y = stageSize.get("altToPx")(posQ.data.alt);
     const transitions = findUpcomingTransitions(pathQ.data.series, pos, target);
 
+    // Gate on field presence rather than the target name so a backend
+    // without phase support just yields a tooltip without the phase line.
+    const phase = posQ.data.illumination != null
+	  ? {illumination: posQ.data.illumination, waxing: posQ.data.waxing}
+	  : null;
+
     return (<TargetTooltip target={target} alt={posQ.data.alt} az={posQ.data.az}
-			    x={x} y={y} transitions={transitions}
+			    x={x} y={y} transitions={transitions} phase={phase}
 			    pointerDirection={edgePointerDirection(x, stageSize)}>
 	    </TargetTooltip>);
 };

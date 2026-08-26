@@ -35,7 +35,16 @@ class GetObjResultSchema(Schema):
         "description": "Target object's azimuth in degrees"})
     radius = fields.Float(required=True, metadata={
         "description": "Target object's apparent radius in degrees"})
-    
+    illumination = fields.Float(required=False, metadata={
+        "description": "Fraction of the disc illuminated, 0..1 "
+        "(moon target only)"})
+    waxing = fields.Boolean(required=False, metadata={
+        "description": "True if the moon is waxing (moon target only)"})
+    bright_limb_angle = fields.Float(required=False, metadata={
+        "description": "Bearing from the moon toward the sun in the "
+        "observer's alt/az frame, degrees clockwise from zenith-up, "
+        "0..360 (moon target only)"})
+
 
 class GetObjTSPointSchema(Schema):
     alt = fields.Float(required=True, metadata={

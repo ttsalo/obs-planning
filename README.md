@@ -68,6 +68,15 @@ frontend at runtime via the new unauthenticated `/config` endpoint
 falls back to the previous `//<host>:8081` behavior, so local and AWS
 deployments are unchanged.
 
+### 0.10.0
+
+Moon phase indication: the moon's marker tooltip shows the illuminated
+percentage and the conventional phase name (e.g. "Waxing gibbous"), and
+the moon marker itself is drawn with the correct phase shape, with the
+illuminated side oriented toward the sun's position on the sky. The
+astro backend's `/api/get-obj` response gains `illumination`, `waxing`
+and `bright_limb_angle` fields for the moon target.
+
 ## Next steps
 
 - On-hover infobox for the objects
