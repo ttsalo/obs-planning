@@ -15,7 +15,7 @@ from werkzeug.exceptions import HTTPException
 from astropy import units as u
 from astropy.time import Time
 from astropy.coordinates import solar_system_ephemeris, EarthLocation, AltAz
-from astropy.coordinates import get_body
+from astropy.coordinates import get_body, GeocentricMeanEcliptic
 from astropy.utils import iers
 
 # Prevent astropy from downloading + CDS-parsing IERS_A on the WSGI
@@ -122,11 +122,12 @@ def _apparent_radius_deg(target, distance_km):
     return math.atan(OBJ_RADII_KM[target.lower()] / float(distance_km)) * 180 / math.pi
 
 
-def _compute_altaz(target, times, loc):
-    """Single vectorized astropy call: returns (altaz, distance_km_at_first_sample).
+def _compute_body(target, times, loc):
+    """Single vectorized astropy call: returns (obj, altaz, distance_km).
 
     `times` can be scalar or array-valued Time; the returned altaz mirrors
-    the input shape. `distance_km` is a plain float pulled from the first
+    the input shape. `obj` is the body's GCRS SkyCoord (needed for phase
+    geometry). `distance_km` is a plain float pulled from the first
     sample — the sun's radius changes ≤ 0.1 % across a day, well below the
     sky renderer's resolution.
     """
@@ -134,7 +135,46 @@ def _compute_altaz(target, times, loc):
         obj = get_body(target, times, loc)
         altaz = obj.transform_to(AltAz(obstime=times, location=loc))
     dist_km = float(np.atleast_1d(obj.distance.km)[0])
+    return obj, altaz, dist_km
+
+
+def _compute_altaz(target, times, loc):
+    """Like _compute_body but without the SkyCoord, for callers that only
+    need the horizontal coordinates."""
+    _, altaz, dist_km = _compute_body(target, times, loc)
     return altaz, dist_km
+
+
+def _moon_phase(t, loc, moon, moon_aa):
+    """Moon-only extras for /api/get-obj: illuminated fraction, waxing flag,
+    and the bright-limb bearing in the observer's alt/az frame (degrees
+    clockwise from 'up' toward the zenith, toward increasing azimuth)."""
+    with solar_system_ephemeris.set("de432s"):
+        sun = get_body("sun", t, loc)
+    sun_aa = sun.transform_to(AltAz(obstime=t, location=loc))
+
+    # Illuminated fraction via the phase angle (astroplan's formula).
+    elong = sun.separation(moon)
+    i = np.arctan2(sun.distance * np.sin(elong),
+                   moon.distance - sun.distance * np.cos(elong))
+    k = float((1 + np.cos(i)) / 2)
+
+    # Waxing iff the moon is east of the sun in ecliptic longitude.
+    ecl = GeocentricMeanEcliptic(obstime=t)
+    dlon = (moon.transform_to(ecl).lon.deg - sun.transform_to(ecl).lon.deg) % 360
+    waxing = bool(dlon < 180)
+
+    # Great-circle initial bearing moon->sun in the alt/az frame. The
+    # azimuth difference only enters via sin/cos, so no wrap handling is
+    # needed; the formula is defined everywhere except exactly at the
+    # zenith, where azimuth itself is undefined.
+    a_m, a_s = float(moon_aa.alt.rad), float(sun_aa.alt.rad)
+    daz = float(sun_aa.az.rad - moon_aa.az.rad)
+    chi = math.degrees(math.atan2(
+        math.cos(a_s) * math.sin(daz),
+        math.cos(a_m) * math.sin(a_s)
+        - math.sin(a_m) * math.cos(a_s) * math.cos(daz))) % 360
+    return {"illumination": k, "waxing": waxing, "bright_limb_angle": chi}
 
 
 @lru_cache(maxsize=64)
@@ -182,11 +222,15 @@ def get_obj():
 
     loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
     t = Time(data["time"])
-    aa, dist_km = _compute_altaz(data["target"], t, loc)
+    obj, aa, dist_km = _compute_body(data["target"], t, loc)
     radius = _apparent_radius_deg(data["target"], dist_km)
-    return jsonify(get_obj_result_schema.dump({"alt": float(aa.alt.deg),
-                                               "az": float(aa.az.deg),
-                                               "radius": radius})), 200
+    result = {"alt": float(aa.alt.deg), "az": float(aa.az.deg),
+              "radius": radius}
+    # Phase fields only for the moon: the extra sun computation must not
+    # land on the ~8 planet requests that hit this endpoint every minute.
+    if data["target"].lower() == "moon":
+        result.update(_moon_phase(t, loc, obj, aa))
+    return jsonify(get_obj_result_schema.dump(result)), 200
 
 
 @app.route("/api/get-obj-timeseries", methods=['POST'], swag=True)
