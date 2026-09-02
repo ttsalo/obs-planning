@@ -77,6 +77,29 @@ illuminated side oriented toward the sun's position on the sky. The
 astro backend's `/api/get-obj` response gains `illumination`, `waxing`
 and `bright_limb_angle` fields for the moon target.
 
+### 0.11.0
+
+Editable observation positions. The top bar's latitude, longitude and
+target read-outs are replaced by an indicator naming the selected
+position, which opens a positions dialog: it lists the user's positions
+with their coordinates, marks the selected one, and adds, edits,
+selects and deletes them. The sky view follows the selection -- the
+markers and paths are recomputed for the selected position's
+coordinates and clipped to its observation window -- and if the session
+names a position the user no longer has, the first one is selected
+instead.
+
+The Go server gains `POST /api/positions`, `PUT /api/positions/:id` and
+`DELETE /api/positions/:id`, all scoped to the JWT user: 400 for an
+invalid name, coordinate or observation window, 404 for a position that
+doesn't exist or belongs to someone else, 409 for a duplicate name and
+for deleting the user's last position. Position names are unique per
+user, enforced by a new `idx_positions_user_name` unique index that
+AutoMigrate adds on the next startup; it is partial on `deleted_at IS
+NULL` so a soft-deleted position doesn't hold on to its name. Only
+`InitTestData` has ever inserted positions, one per user, so no
+existing database can have the duplicates that would block the index.
+
 ## Next steps
 
 - On-hover infobox for the objects

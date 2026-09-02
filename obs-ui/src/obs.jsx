@@ -6,7 +6,7 @@ import {
 import Konva from 'konva';
 import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
 	 Tag, Shape } from 'react-konva';
-import { SessionContext, StageContext } from './session.jsx'
+import { SessionContext, StageContext, updateSession } from './session.jsx'
 import { useAstroBase } from './config.jsx'
 import { altToBrightness, brightnessChangeToAlt, checkObsWindow,
 	 findUpcomingTransitions, findNextTransition } from './transitions.jsx'
@@ -198,9 +198,12 @@ function useTargetPathData(target, pos, stageSize) {
     // The datetime part of the query key is divided so that it has
     // a half an hour granularity, so the one minute intervals for
     // updating target object positions don't re-query the path data
-    // more of then than that.
+    // more of then than that. The position is part of the key as well,
+    // by id and by coordinates: without it a path computed for the old
+    // location would be reused after switching position, and the id
+    // alone wouldn't notice the selected position being edited.
     return useQuery({
-	queryKey: ['targetPathData', target,
+	queryKey: ['targetPathData', target, pos.ID, pos.lat, pos.lon,
 		   Math.floor(renderTS / 1000 / 60 / 30)],
 	queryFn: async () => {
 	    const resp = await axios.post(
@@ -219,7 +222,7 @@ function useTargetPosition(target, pos, stageSize) {
     const renderTS = CalcRenderTS(stageSize);
     const astroBase = useAstroBase();
     return useQuery({
-	queryKey: ['targetData', target, renderTS],
+	queryKey: ['targetData', target, pos.ID, pos.lat, pos.lon, renderTS],
 	queryFn: async () => {
 	    const resp = await axios.post(
 		`${astroBase}/api/get-obj`,
@@ -642,7 +645,7 @@ function CoordGrid() {
 	    </Group>);
 };
 
-const ObsStage = () => {
+const ObsStage = ({setSession}) => {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
     // null | {type:'target', target} | {type:'segment', target, startIndex}
@@ -674,6 +677,33 @@ const ObsStage = () => {
 	    },
 	})
 
+    const positions = posQ.data;
+    const pos = positions?.find((i) => (i.name == session?.position))
+
+    /* The session identifies the selected position by name, so it can
+       name one that isn't there: deleted, renamed, or the "Helsinki" a
+       fresh session defaults to for a user who has no position by that
+       name. Fall back to the user's first position and persist the
+       choice, rather than rendering an empty stage forever. Doing it
+       here rather than in the server's get-session keeps the session
+       endpoints DB-free, which is what lets them be registered before
+       the database is up. The ref keeps a slow update-session round
+       trip from re-firing the same fallback on every render. */
+    const fallbackRef = useRef(null);
+    useEffect(() => {
+	if (session == null || positions == null || positions.length == 0) {
+	    return;
+	}
+	if (pos != null) {
+	    fallbackRef.current = null;
+	    return;
+	}
+	const first = positions[0].name;
+	if (fallbackRef.current == first) return;
+	fallbackRef.current = first;
+	updateSession(session, setSession, {...session, position: first});
+    }, [session, setSession, positions, pos]);
+
     if (session == null) {
 	console.log("session null, skip rendering contents");
 	return null;
@@ -690,7 +720,20 @@ const ObsStage = () => {
 	return null;
     };
 
-    const pos = posQ.data.find((i) => (i.name == session.position))
+    if (posQ.data.length == 0) {
+	// No positions at all, so the fallback has nowhere to point:
+	// draw the empty sky and leave it at that.
+	console.log("no positions, rendering an empty sky");
+	return (<Layer>
+		    <CoordGrid></CoordGrid>
+		</Layer>);
+    };
+    if (pos == null) {
+	// The fallback above is on its way; skip this frame rather than
+	// render targets for a position that isn't there.
+	return null;
+    };
+
     const search = searchQ.data.find((i) => (i.name == session.search))
 
     const paths = search.TargetObjects.map(obj =>
