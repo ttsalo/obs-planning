@@ -1,11 +1,12 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Button, Flex, Layout, ConfigProvider, Typography, Input, InputNumber,
-	 Space, Modal, Row, Col, Select, DatePicker, TimePicker } from 'antd';
+import { Button, Flex, Layout, ConfigProvider, Typography,
+	 Space, DatePicker, TimePicker } from 'antd';
 import { Stage, Layer, Rect, Circle, Text } from 'react-konva';
 import dayjs from 'dayjs';
 import axios from 'axios';
 import ObsStage from './obs.jsx';
-import { SessionContext, StageContext, updateSession } from './session.jsx'
+import { SessionContext, StageContext } from './session.jsx'
+import PositionsDialog from './positions.jsx'
 import { useAstroBase } from './config.jsx'
 
 const App = () => {
@@ -120,75 +121,13 @@ const App = () => {
     const showModal = () => {
 	setIsModalOpen(true);
     };
-    
-    const SetDialog = () => {
-	const handleOk = () => {
-	    setIsModalOpen(false);
-	    updateSession(session, setSession, {"lat": lat, "lon": lon,
-						"target": target});
-	};
-	const handleCancel = () => {
-	    setIsModalOpen(false);
-	};
-	const [lat, setLat] = useState(session?.lat);
-	const [lon, setLon] = useState(session?.lon);
-	const [target, setTarget] = useState(session?.target);
 
-	return <ConfigProvider
-		   theme={{token:
-			   {colorText: 'black'}}}>
-		   <Modal
-		       title="Set observation parameters"
-		       closable={{ 'aria-label':
-				   'Set' }}
-		       open={isModalOpen}
-		       onOk={handleOk}
-		       onCancel={handleCancel}>
-		       <Row>
-			   <Col className="gutter-row" span={8}>
-			       <Typography.Text>Latitude</Typography.Text>
-			   </Col>
-			   <Col className="gutter-row" span={8}>
-			       <Typography.Text>Longitude</Typography.Text>
-			   </Col>
-			   <Col className="gutter-row" span={8}>
-			       <Typography.Text>Target(s)</Typography.Text>
-			   </Col>
-		       </Row>
-		       <Row>
-			   <Col className="gutter-row" span={8}>
-			       <InputNumber min={-90} max={90} value={lat}
-					    onChange={setLat}>
-			       </InputNumber>
-			   </Col>
-			   <Col className="gutter-row" span={8}>
-			       <InputNumber min={-180} max={180} value={lon}
-					    onChange={setLon}>
-			       </InputNumber>
-			   </Col>
-			   <Col className="gutter-row" span={8}>
-			       <Select options={[
-					   { value: 'moon',
-					     label: <span>Moon</span> },
-					   { value: 'mercury',
-					     label: <span>Mercury</span> },
-					   { value: 'venus',
-					     label: <span>Venus</span> },
-					   { value: 'mars',
-					     label: <span>Mars</span> },
-					   { value: 'jupiter',
-					     label: <span>Jupiter</span> }]}
-				       default={'moon'}
-				       value={target}
-				       style={{width: '100%'}}
-				       onChange={setTarget}>
-			       </Select>
-			   </Col>
-		       </Row>
-		   </Modal>
-	       </ConfigProvider>
-    };
-    
+    // The session names the selected position; until it has loaded
+    // there's nothing to name yet.
+    const positionLabel = session == null ? "Loading..."
+	  : session.position || "(no position)";
+
+
     const onTimeChange = (time, timeString) => {
 	const newStageMap = new Map(stageSize);
 	newStageMap.set("time", time);
@@ -236,36 +175,25 @@ const App = () => {
 					       onChange={onTimeChange} />
 				       </Space.Compact>
 				   </ConfigProvider>
-				   <Space.Compact>
-				       <Typography.Text strong={true}>
-					   Lat:
-				       </Typography.Text>
-				       <Typography.Text>
-					   {session?.lat}
-				       </Typography.Text>
-				   </Space.Compact>
-				   <Space.Compact>
-				       <Typography.Text strong={true}>
-					   Lon:
-				       </Typography.Text>
-				       <Typography.Text>
-					   {session?.lon}
-				       </Typography.Text>
-				   </Space.Compact>
-				   <Space.Compact>
-				       <Typography.Text strong={true}>
-					   Target:
-				       </Typography.Text>
-				       <Typography.Text>
-					   {session?.target}
-				       </Typography.Text>
-				   </Space.Compact>
-				   <Button type="primary"
+				   <Button type="text"
 					   onClick={showModal}>
-				       Set
+				       <Typography.Text strong={true}>
+					   Position:
+				       </Typography.Text>
+				       <Typography.Text
+					   ellipsis={true}
+					   style={{display: 'inline-block',
+						   verticalAlign: 'bottom',
+						   maxWidth: 200}}>
+					   {positionLabel}
+				       </Typography.Text>
 				   </Button>
-				   <SetDialog>
-				   </SetDialog>
+				   <PositionsDialog
+				       open={isModalOpen}
+				       onClose={() => setIsModalOpen(false)}
+				       session={session}
+				       setSession={setSession}>
+				   </PositionsDialog>
 			       </Space>
 			   </Flex>
 		       </ConfigProvider>
@@ -283,7 +211,7 @@ const App = () => {
 				   scaleY={stageSize.get("scale")}
 			           draggable>
 				   <StageContext value={stageSize}>
-				       <ObsStage>
+				       <ObsStage setSession={setSession}>
 				       </ObsStage>
 				   </StageContext>
 			       </Stage>

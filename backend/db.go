@@ -2,8 +2,10 @@ package main
 
 import (
     "context"
+    "errors"
     "fmt"
     "os"
+    "strings"
     "github.com/labstack/echo/v4"
     "gorm.io/driver/postgres"
     "gorm.io/gorm"
@@ -18,11 +20,12 @@ type User struct {
 
 // Observation position record. Specifies a lat-lon position and
 // an observation window (which part of sky is visible from that
-// position)
+// position). Names are unique per user: the session identifies the
+// selected position by name, so the name has to resolve to one row.
 type Position struct {
     gorm.Model
-    Name string `json:"name"`
-    UserID uint `json:"user_id"`
+    Name string `json:"name" gorm:"uniqueIndex:idx_positions_user_name,where:deleted_at IS NULL"`
+    UserID uint `json:"user_id" gorm:"uniqueIndex:idx_positions_user_name,where:deleted_at IS NULL"`
     User User
     Lat float64 `json:"lat"`
     Lon float64 `json:"lon"`
@@ -30,6 +33,35 @@ type Position struct {
     MaxAz float64 `json:"max_az"`
     MinAlt float64 `json:"min_alt"`
     MaxAlt float64 `json:"max_alt"`
+}
+
+// Check that the position's name and coordinates make sense. Used by
+// both the create and the update endpoint so the rules can't drift
+// apart, and the returned message is what the positions dialog shows
+// the user, so keep it readable.
+func (p *Position) Validate() error {
+    if strings.TrimSpace(p.Name) == "" {
+	return errors.New("Name must not be empty")
+    }
+    if p.Lat < -90 || p.Lat > 90 {
+	return errors.New("Latitude must be between -90 and 90")
+    }
+    if p.Lon < -180 || p.Lon > 180 {
+	return errors.New("Longitude must be between -180 and 180")
+    }
+    if p.MinAz < 0 || p.MinAz > 360 || p.MaxAz < 0 || p.MaxAz > 360 {
+	return errors.New("Azimuth limits must be between 0 and 360")
+    }
+    if p.MinAlt < -90 || p.MinAlt > 90 || p.MaxAlt < -90 || p.MaxAlt > 90 {
+	return errors.New("Altitude limits must be between -90 and 90")
+    }
+    if p.MinAz > p.MaxAz {
+	return errors.New("Minimum azimuth must not exceed maximum azimuth")
+    }
+    if p.MinAlt > p.MaxAlt {
+	return errors.New("Minimum altitude must not exceed maximum altitude")
+    }
+    return nil
 }
 
 // Stored search object. Workflow is that user specifies a search string
