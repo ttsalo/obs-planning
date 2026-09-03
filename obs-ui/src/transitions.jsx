@@ -18,9 +18,19 @@ export function brightnessChangeToAlt(b1, b2) {
     return -6;
 }
 
+// Is the azimuth inside the position's azimuth limits? Azimuth is
+// circular, so a maximum below the minimum means the window wraps
+// through north: 125 -> 45 covers south-east round to north-east.
+// Equal limits match nothing. Strict on both ends, like the altitude.
+export function azInWindow(pos, az) {
+    if (pos.min_az <= pos.max_az) {
+	return az > pos.min_az && az < pos.max_az;
+    }
+    return az > pos.min_az || az < pos.max_az;
+};
+
 export function checkObsWindow(pos, alt, az) {
-    return (alt > pos.min_alt && alt < pos.max_alt &&
-	    az > pos.min_az && az < pos.max_az);
+    return (alt > pos.min_alt && alt < pos.max_alt && azInWindow(pos, az));
 };
 
 // Raw-value analogue of TargetPath's pixel-space interpolateTransition:

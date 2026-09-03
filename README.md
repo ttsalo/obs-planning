@@ -100,6 +100,61 @@ NULL` so a soft-deleted position doesn't hold on to its name. Only
 `InitTestData` has ever inserted positions, one per user, so no
 existing database can have the duplicates that would block the index.
 
+### 0.12.0
+
+Observation target searches. A new "Search" indicator in the top bar
+opens a searches dialog that lists the user's saved searches, selects
+one into the session, and adds, edits and deletes them. A search is a
+definition -- a target set (the planets, the Messier objects, double
+stars at or brighter than a magnitude, or a list of names), observing
+hours such as 22:00-02:00, an optional range of up to 31 days, a
+minimum visibility (inside the selected position's observation window,
+above the horizon, or none) and a maximum sky brightness (night or a
+twilight level) -- plus every object the set resolved to, each flagged
+with whether it met the criteria at some 30-minute sample of the
+windows when the search was last evaluated. The add/edit form has an
+explicit Evaluate step before Save: the set is resolved through the
+SIMBAD catalog (via `astroquery`; the planets need no catalog) only
+when the set is new or changed, and the criteria are then applied to
+the stored candidates for the selected position, so a saved search can
+be reopened and given new criteria or a new time period without a
+catalog lookup, even while SIMBAD is down. Times are the browser's
+local wall-clock time, like the date and time pickers; without a day
+range the search is evaluated for the night beginning on the date the
+app is showing.
+
+The sky view draws the selected search's matched objects: planets look
+as before, catalog objects get a marker by type (star, extended object,
+other) with a tooltip giving the type and magnitude. Their positions
+come from one batched request per refresh, however many there are.
+Paths are drawn for every object when a search has at most ten matches,
+otherwise only for the hovered or tapped one. If the selected search
+disappears the first remaining one is selected; with none left only the
+Sun is drawn.
+
+New endpoints: on the Go server `POST /api/searches`, `PUT
+/api/searches/:id` and `DELETE /api/searches/:id` (400/404/409 as for
+positions; the last search may be deleted), with `GET /api/searches`
+now returning the definition and the flagged candidates; on the astro
+server `POST /api/resolve-targets` (set → candidates, 400 above 2000
+candidates, 502 when SIMBAD is unreachable), `POST /api/filter-targets`
+(candidates + windows + criteria → one flag per candidate), `POST
+/api/get-objs` (batched positions), and `ra`/`dec` on
+`/api/get-obj-timeseries` for fixed objects. The `TargetSearch` table
+gains the definition columns and a per-user unique name index;
+`TargetObject` becomes owned by one search (`target_search_id`) with
+magnitude, type and matched flag, and the old `search_results` join
+table is left unused. `InitTestData` backfills a previously seeded
+"Planets" search on first start. The astro containers now need
+outbound HTTPS to SIMBAD at search time; `requirements.txt` is pinned
+under Python 3.9 to match the container image.
+
+A position's observation window may now wrap through north: a maximum
+azimuth below the minimum (for example 125 to 45) is accepted and means
+azimuths above the minimum or below the maximum. The sky view's path
+clipping, the rise and set times in the tooltips and the search filter
+all apply the same rule.
+
 ## Next steps
 
 - On-hover infobox for the objects
