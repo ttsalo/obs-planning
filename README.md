@@ -172,11 +172,41 @@ the host OS has problems running the application code locally.
 ## Run backend images using docker compose
 `make runserver`
 
-Local development cycle is intended to be: Modify code (whether
-JS or either server), Ctrl-C previous `make runserver`, re-run
-`make runserver`
+This builds the UI into the Go server's static files and runs the
+images as they are deployed. The cycle for a code change is: Ctrl-C the
+previous `make runserver`, re-run `make runserver`.
 
 UI will be reachable in http://localhost:8080/
+
+## Run the live-reload development stack
+`make dev`
+
+Same three containers (plus a Vite dev server), but code changes are
+picked up without a rebuild/restart cycle:
+
+- **UI**: served by Vite with hot module replacement, so a saved `.jsx`
+  file updates the running page. The dev server proxies `/api`,
+  `/login` and `/config` to the Go container, so the app sees the same
+  single origin as in a deployment; astronomy calls go directly to
+  port 8081 as usual.
+- **Go server**: changed sources are synced into the container and it
+  is restarted — its command is `go run`, so the restart recompiles
+  (a few seconds).
+- **Astro server**: changed sources are synced in and gunicorn's own
+  `--reload` restarts the worker. The dev stack runs one worker without
+  `--preload`, which is what makes reloading work.
+
+Changes to `go.mod`/`go.sum`, `requirements.txt` or `package.json`
+rebuild the image for that service instead of syncing.
+
+UI will be reachable in http://localhost:5173/ (port 8080 still answers
+the API, but serves whatever `backend/static` held when the image was
+built — use 5173 for the app).
+
+`make dev` needs `OBS_DB_PASSWORD` exported, like `make runserver`.
+Ctrl-C stops the stack; `make dev-down` also removes the containers.
+The overlay lives in `compose.dev.yaml`; the deployed images and
+`make runserver` are unaffected by it.
 
 ## Clean up unused images from docker
 

@@ -1,0 +1,21 @@
+# Development-only image: the Vite dev server with HMR, used by the
+# `frontend` service of compose.dev.yaml. The production path is
+# unchanged — `make build` builds the app into backend/static and the
+# Go server serves it from there.
+FROM node:22-bookworm-slim
+
+WORKDIR /app
+
+# node_modules is baked into the image and compose.dev.yaml mounts only
+# the sources over it, so the dev server needs no install step at
+# startup and the host's node_modules (built against the host's libc)
+# is never used inside the container.
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY . .
+
+EXPOSE 5173
+
+# --host binds 0.0.0.0 so the published port reaches the dev server.
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]

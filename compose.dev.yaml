@@ -1,0 +1,106 @@
+# Live-reload development overlay for compose.yaml. Run it with
+# `make dev` (docker compose -f compose.yaml -f compose.dev.yaml
+# up --build --watch); the plain `make runserver` stack is unchanged.
+#
+# What it adds:
+#  - a Vite dev server on :5173 with HMR, serving the React app instead
+#    of the Go server's pre-built copy in backend/static, and proxying
+#    /api, /login and /config to the Go server so the app still sees a
+#    single origin. Astro calls are not proxied — they go straight to
+#    //localhost:8081 through the published astrobackend port, exactly
+#    as they do in the built stack.
+#  - `docker compose watch` rules that sync changed sources into the
+#    running containers: Go sources restart the container (its CMD is
+#    `go run`, so the restart recompiles), Python sources are picked up
+#    by gunicorn's own reloader. Manifest changes (go.mod/go.sum,
+#    requirements.txt, package.json) rebuild the image instead.
+#
+# The UI is at http://localhost:5173/ in this stack. Port 8080 still
+# answers the API, but serves whatever backend/static held at image
+# build time, so use 5173 for the app.
+
+services:
+  backend:
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend
+          target: /opt/obs-planner
+          ignore:
+            # Built by `make build`, irrelevant while Vite serves the UI.
+            - static/
+            # Editor backups and build/deploy artifacts, not sources.
+            - "*~"
+            - server
+            - obs-planning-backend
+            - repository.json
+            # Handled by the rebuild rules below; kept out of the sync
+            # rule so the two can never both match a change.
+            - go.mod
+            - go.sum
+        # A dependency change needs `go mod download` again, so rebuild.
+        - action: rebuild
+          path: ./backend/go.mod
+        - action: rebuild
+          path: ./backend/go.sum
+
+  astrobackend:
+    # -w 1 --reload and no --preload: gunicorn's reloader restarts the
+    # worker when an imported module's file changes, which --preload
+    # (app imported once in the master) would defeat. A single worker
+    # keeps the astropy re-import on reload to one process; the
+    # production CMD in the Dockerfile keeps its 2 preloaded workers.
+    command:
+      - gunicorn
+      - -w
+      - "1"
+      - -b
+      - 0.0.0.0
+      - --timeout
+      - "120"
+      - --reload
+      - server:app
+    develop:
+      watch:
+        - action: sync
+          path: ./astrobackend
+          target: /opt/obs-astro
+          ignore:
+            # The container has its own venv at this path; never let the
+            # host's local one (make check) overwrite it.
+            - .astrovenv/
+            - __pycache__/
+            - "*~"
+            - repository.json
+            # Handled by the rebuild rule below; see the backend note.
+            - requirements.txt
+        - action: rebuild
+          path: ./astrobackend/requirements.txt
+
+  frontend:
+    build:
+      context: obs-ui
+      dockerfile: Dockerfile.dev
+    ports:
+      - 5173:5173
+    environment:
+      # Proxy target for /api, /login and /config (see vite.config.js).
+      OBS_BACKEND_URL: http://backend:80
+    # node_modules stays in the image, so only the sources are mounted —
+    # the host's obs-ui/node_modules is never mounted over the image's.
+    volumes:
+      - ./obs-ui/src:/app/src
+      - ./obs-ui/index.html:/app/index.html
+      - ./obs-ui/vite.config.js:/app/vite.config.js
+    develop:
+      watch:
+        # Vite's own watcher handles the mounted sources; only a
+        # dependency change needs the image (and its npm ci) rebuilt.
+        - action: rebuild
+          path: ./obs-ui/package.json
+        - action: rebuild
+          path: ./obs-ui/package-lock.json
+    depends_on:
+      - backend
+    networks:
+      - obs

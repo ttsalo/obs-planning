@@ -1,5 +1,7 @@
 include defines.mk
 
+COMPOSE_DEV=docker compose -f compose.yaml -f compose.dev.yaml
+
 build:
 	(cd obs-ui && npm run build && mkdir -p ../backend/static/ && \
 	cp -a dist/* ../backend/static/ && \
@@ -13,6 +15,18 @@ check:
 
 runserver: build
 	docker compose up
+
+# Live-reload development stack (compose.dev.yaml): the UI is served by
+# a Vite dev server with HMR at http://localhost:5173/, Go sources are
+# synced into the backend container and restart it, and Python sources
+# reload in gunicorn. Needs OBS_DB_PASSWORD exported, like runserver.
+# Ctrl-C stops the stack; no rebuild/restart cycle for code changes.
+dev:
+	$(COMPOSE_DEV) up --build --watch
+
+# Ctrl-C already stops `make dev`; this also removes the containers.
+dev-down:
+	$(COMPOSE_DEV) down
 
 aws-push:
 	make -C backend create-repository build aws-push
