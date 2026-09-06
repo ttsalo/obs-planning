@@ -8,3 +8,4 @@ jplephem
 marshmallow
 pip-tools
 pytest
+astroquery

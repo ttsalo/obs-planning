@@ -5,9 +5,10 @@ import {
 } from '@tanstack/react-query'
 import Konva from 'konva';
 import { Stage, Layer, Rect, Circle, Text, Line, Group, Label,
-	 Tag, Shape } from 'react-konva';
+	 Tag, Shape, Star } from 'react-konva';
 import { SessionContext, StageContext, updateSession } from './session.jsx'
 import { useAstroBase } from './config.jsx'
+import { useSearches } from './searches.jsx'
 import { altToBrightness, brightnessChangeToAlt, checkObsWindow,
 	 findUpcomingTransitions, findNextTransition } from './transitions.jsx'
 
@@ -27,6 +28,42 @@ objMap.set("Neptune", {fill: "cornflowerblue", radius: 5});
 // is a separate stroke-only circle on top of the phase shapes) matches the
 // plain filled-circle objects exactly.
 const objStrokeWidth = 1.2;
+
+// A search with this many matched objects or fewer gets a path for
+// every one of them, as the planets always have; above it only the
+// hovered object's path is drawn so a Messier-sized search stays
+// readable.
+const MAX_PATHS_ALWAYS = 10;
+
+// Catalog objects have no artistic marker of their own; they get a
+// shape by kind: a four-point star for stars, a hollow circle for
+// extended objects (galaxies, clusters, nebulae), a dot for the rest.
+function markerKind(objectType) {
+    const t = (objectType || "").toLowerCase();
+    if (t == "") return "dot";
+    if (/star|binary|variable|giant|dwarf|cepheid|mira|asterism/.test(t)) {
+	return "star";
+    }
+    return "extended";
+}
+
+function FixedMarker({x, y, objectType}) {
+    const kind = markerKind(objectType);
+    if (kind == "star") {
+	return (<Star x={x} y={y} numPoints={4} innerRadius={1.8}
+		      outerRadius={6} fill="white" stroke="black"
+		      strokeWidth={objStrokeWidth}>
+		</Star>);
+    }
+    if (kind == "extended") {
+	return (<Circle x={x} y={y} radius={5} stroke="white"
+			strokeWidth={1.5} fill="rgba(255,255,255,0.25)">
+		</Circle>);
+    }
+    return (<Circle x={x} y={y} radius={3} fill="white" stroke="black"
+		    strokeWidth={objStrokeWidth}>
+	    </Circle>);
+}
 
 // Draw the representation of a given object. When phase data is present
 // (moon only), the disc is split into a dark base circle and a lit region
@@ -110,19 +147,24 @@ function InfoTooltip({x, y, lines, pointerDirection = "up", opacity = 0.9}) {
 }
 
 // Hover/tap tooltip for a target marker: name, current alt/az, the moon
-// phase (moon only, when the backend provides it), and the next upcoming
-// brightness and visibility transitions. pointerDirection
+// phase (moon only, when the backend provides it), the catalog type and
+// magnitude (fixed objects only), and the next upcoming brightness and
+// visibility transitions. pointerDirection
 // defaults to centering the box above the marker, but the caller passes
 // "left"/"right" near the edges of the visible area so the box is anchored
 // away from the edge instead of clipping off it (see edgePointerDirection).
 function TargetTooltip({target, alt, az, x, y, transitions, phase = null,
-			 pointerDirection = "up"}) {
+			 info = null, pointerDirection = "up"}) {
     const lines = [
 	target,
 	`Alt ${alt.toFixed(1)}°  Az ${az.toFixed(1)}°`,
 	...(phase != null
 	    ? [`Phase: ${Math.round(phase.illumination * 100)}% ` +
 	       moonPhaseLabel(phase.illumination, phase.waxing)]
+	    : []),
+	...(info != null && !info.ss_obj
+	    ? [(info.object_type || "Catalog object") +
+	       (info.magnitude != null ? `  Mag ${info.magnitude.toFixed(1)}` : "")]
 	    : []),
 	transitions.brightness
 	    ? `Next: ${brightnessLabel[transitions.brightness.b]} ` +
@@ -189,9 +231,11 @@ function CalcRenderTS(stageSize) {
 }
 
 // Fetches the day-long alt/az/sun_alt timeseries for a target. Shared by
-// TargetPath (path rendering) and Target (upcoming-transitions tooltip) so
-// the two components' React Query cache entries are the same request.
-function useTargetPathData(target, pos, stageSize) {
+// TargetPath (path rendering) and the tooltips (upcoming transitions) so
+// the components' React Query cache entries are the same request. For
+// a fixed catalog object, coords is its {ra, dec} and the target name
+// is only a label.
+function useTargetPathData(target, pos, stageSize, coords = null) {
     const renderTS = CalcRenderTS(stageSize);
     const astroBase = useAstroBase();
 
@@ -203,26 +247,29 @@ function useTargetPathData(target, pos, stageSize) {
     // location would be reused after switching position, and the id
     // alone wouldn't notice the selected position being edited.
     return useQuery({
-	queryKey: ['targetPathData', target, pos.ID, pos.lat, pos.lon,
+	queryKey: ['targetPathData', target, coords?.ra, coords?.dec,
+		   pos.ID, pos.lat, pos.lon,
 		   Math.floor(renderTS / 1000 / 60 / 30)],
 	queryFn: async () => {
 	    const resp = await axios.post(
 		`${astroBase}/api/get-obj-timeseries`,
 		{target: target, lat: pos.lat,
 		 lon: pos.lon, time: renderTS,
-		 timespan: "day"},
+		 timespan: "day",
+		 ...(coords ? {ra: coords.ra, dec: coords.dec} : {})},
 		{timeout: 120 * 1000});
 	    return resp.data;
 	}
     });
 }
 
-// Fetches the current alt/az/radius for a target.
-function useTargetPosition(target, pos, stageSize) {
+// Fetches the current alt/az/radius for a solar-system target.
+function useTargetPosition(target, pos, stageSize, enabled = true) {
     const renderTS = CalcRenderTS(stageSize);
     const astroBase = useAstroBase();
     return useQuery({
 	queryKey: ['targetData', target, pos.ID, pos.lat, pos.lon, renderTS],
+	enabled,
 	queryFn: async () => {
 	    const resp = await axios.post(
 		`${astroBase}/api/get-obj`,
@@ -232,6 +279,74 @@ function useTargetPosition(target, pos, stageSize) {
 	    return resp.data;
 	}
     });
+}
+
+// Fetches the current alt/az (plus radius and phase for solar-system
+// bodies) of every matched object of the selected search in one
+// request, so the per-minute refresh costs one request however many
+// objects the search has. The result list is in the targets' order.
+function useBatchPositions(targets, pos, stageSize) {
+    const renderTS = CalcRenderTS(stageSize);
+    const astroBase = useAstroBase();
+    const targetsKey = targets.map(
+	(t) => `${t.name}|${t.ss_obj ? "" : `${t.ra},${t.dec}`}`).join(";");
+    return useQuery({
+	queryKey: ['targetsBatch', pos?.ID, pos?.lat, pos?.lon, renderTS,
+		   targetsKey],
+	enabled: pos != null && targets.length > 0,
+	queryFn: async () => {
+	    const resp = await axios.post(
+		`${astroBase}/api/get-objs`,
+		{lat: pos.lat, lon: pos.lon, time: renderTS,
+		 targets: targets.map((t) => ({
+		     name: t.name, ss_obj: t.ss_obj,
+		     ra: t.ss_obj ? null : t.ra,
+		     dec: t.ss_obj ? null : t.dec}))},
+		{timeout: 120 * 1000});
+	    return resp.data.results;
+	}
+    });
+}
+
+// Markers for the selected search's matched objects, entries being
+// the batch request's results in the targets' order: the artistic
+// ObsObject for solar-system bodies, a marker by catalog type for the
+// rest. Reports hover the same way Target does.
+function ResultMarkers({targets, entries, onHover}) {
+    const stageSize = useContext(StageContext);
+
+    const markers = entries.map((entry, i) => {
+	const obj = targets[i];
+	if (obj == null || obj.name != entry.name) return null;
+	const x = stageSize.get("azToPx")(entry.az);
+	const y = stageSize.get("altToPx")(entry.alt);
+	const hover = {type: 'target', target: obj.name};
+	const same = (prev) =>
+	      prev?.type === 'target' && prev.target === obj.name;
+	return (<Group key={obj.name}
+		       onMouseEnter={(e) => {
+			   onHover(hover);
+			   e.target.getStage().container().style.cursor = 'pointer';
+		       }}
+		       onMouseLeave={(e) => {
+			   onHover((prev) => same(prev) ? null : prev);
+			   e.target.getStage().container().style.cursor = 'default';
+		       }}
+		       onTap={() => onHover((prev) => same(prev) ? null : hover)}>
+		    {obj.ss_obj
+		     ? <ObsObject target={obj.name} x={x} y={y}
+				  radius={(entry.radius || 0) * stageSize.get("zoom")
+					  * stageSize.get("moonzoom")}
+				  alt={entry.alt}
+				  phase={entry.illumination != null
+					 ? {k: entry.illumination,
+					    angle: entry.bright_limb_angle}
+					 : null}></ObsObject>
+		     : <FixedMarker x={x} y={y} objectType={obj.object_type}>
+		       </FixedMarker>}
+		</Group>);
+    });
+    return <>{markers}</>;
 }
 
 // Component to plot the current position of the given target in the sky,
@@ -286,30 +401,37 @@ function Target({target, pos, fill="white", onHover}) {
 // Renders the tooltip for whichever target is currently hovered/tapped.
 // Rendered once by ObsStage as the last child of the Layer so it always
 // paints on top of every path and marker, regardless of which target it's
-// for (the Sun's path/labels are otherwise always drawn last).
-function HoveredTooltip({target, pos}) {
+// for (the Sun's path/labels are otherwise always drawn last). For a
+// search result, info is its candidate record and entry its current
+// position from the batch request; the Sun has neither and is fetched
+// on its own.
+function HoveredTooltip({target, pos, info = null, entry = null}) {
     const stageSize = useContext(StageContext);
-    const posQ = useTargetPosition(target, pos, stageSize);
+    const posQ = useTargetPosition(target, pos, stageSize, entry == null);
     // React Query dedupes this against TargetPath's identical query for
     // the same target, so this normally isn't an extra network request.
-    const pathQ = useTargetPathData(target, pos, stageSize);
+    const coords = info != null && !info.ss_obj
+	  ? {ra: info.ra, dec: info.dec} : null;
+    const pathQ = useTargetPathData(target, pos, stageSize, coords);
 
-    if (posQ.isPending || posQ.error || pathQ.isPending || pathQ.error) {
+    const current = entry ?? posQ.data;
+    if (current == null || pathQ.isPending || pathQ.error) {
 	return null;
     }
 
-    const x = stageSize.get("azToPx")(posQ.data.az);
-    const y = stageSize.get("altToPx")(posQ.data.alt);
+    const x = stageSize.get("azToPx")(current.az);
+    const y = stageSize.get("altToPx")(current.alt);
     const transitions = findUpcomingTransitions(pathQ.data.series, pos, target);
 
     // Gate on field presence rather than the target name so a backend
     // without phase support just yields a tooltip without the phase line.
-    const phase = posQ.data.illumination != null
-	  ? {illumination: posQ.data.illumination, waxing: posQ.data.waxing}
+    const phase = current.illumination != null
+	  ? {illumination: current.illumination, waxing: current.waxing}
 	  : null;
 
-    return (<TargetTooltip target={target} alt={posQ.data.alt} az={posQ.data.az}
+    return (<TargetTooltip target={target} alt={current.alt} az={current.az}
 			    x={x} y={y} transitions={transitions} phase={phase}
+			    info={info}
 			    pointerDirection={edgePointerDirection(x, stageSize)}>
 	    </TargetTooltip>);
 };
@@ -319,11 +441,11 @@ function HoveredTooltip({target, pos}) {
 // last child of the Layer so it's always on top. startIndex is the
 // data.series index of the interval's first sample; the interval's
 // midpoint alt/az/time is the plain average of that sample and the next.
-function HoveredSegmentTooltip({target, startIndex, pos}) {
+function HoveredSegmentTooltip({target, startIndex, pos, coords = null}) {
     const stageSize = useContext(StageContext);
     // React Query dedupes this against TargetPath's identical query for
     // the same target, so this normally isn't an extra network request.
-    const pathQ = useTargetPathData(target, pos, stageSize);
+    const pathQ = useTargetPathData(target, pos, stageSize, coords);
 
     if (pathQ.isPending || pathQ.error) {
 	return null;
@@ -353,8 +475,9 @@ function HoveredSegmentTooltip({target, startIndex, pos}) {
 };
 
 // Component to plot the future path of a given target in the sky,
-// seen from the geographic location in the settings.
-function TargetPath({target, pos, onHover}) {
+// seen from the geographic location in the settings. coords is the
+// {ra, dec} of a fixed catalog object, null for solar-system bodies.
+function TargetPath({target, pos, onHover, coords = null}) {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
 
@@ -374,7 +497,8 @@ function TargetPath({target, pos, onHover}) {
 		new Date(ts1.getTime() + ((ts2 - ts1) * d))];
     };
 
-    const { isPending, error, data } = useTargetPathData(target, pos, stageSize);
+    const { isPending, error, data } = useTargetPathData(target, pos, stageSize,
+							 coords);
 
     if (error) { console.log(`error=${error}`)};
     if (isPending) { return null };
@@ -668,17 +792,24 @@ const ObsStage = ({setSession}) => {
 	    return response.data;
 	    },
 	})
-    const searchQ = useQuery({
-	queryKey: ["searches"],
-	enabled: session != null,
-	queryFn: async () => {
-	    const response = await axios.get('/api/searches');
-	    return response.data;
-	    },
-	})
+    const searchQ = useSearches(session);
 
     const positions = posQ.data;
     const pos = positions?.find((i) => (i.name == session?.position))
+    const searches = searchQ.data;
+    const search = searches?.find((i) => (i.name == session?.search))
+
+    // The objects to draw: the selected search's matched candidates.
+    // Unmatched ones never reach the canvas, and the Sun is drawn on
+    // its own regardless, so a "Sun" in a name list is skipped rather
+    // than drawn twice. No search (or one still being selected by the
+    // fallback below) means the Sun alone. Their current positions
+    // come from one batch request per refresh, however many there are.
+    const targets = (search?.TargetObjects || []).filter(
+	(obj) => obj.matched && obj.name != "Sun");
+    const batchQ = useBatchPositions(targets, pos, stageSize);
+    if (batchQ.error) { console.log(`error=${batchQ.error}`) };
+    const entries = (targets.length > 0 && batchQ.data) || [];
 
     /* The session identifies the selected position by name, so it can
        name one that isn't there: deleted, renamed, or the "Helsinki" a
@@ -703,6 +834,25 @@ const ObsStage = ({setSession}) => {
 	fallbackRef.current = first;
 	updateSession(session, setSession, {...session, position: first});
     }, [session, setSession, positions, pos]);
+
+    /* The same for the search: a deleted or renamed selected search
+       falls back to the user's first one. With no searches at all
+       there is nothing to fall back to and the stage draws the Sun
+       alone. */
+    const searchFallbackRef = useRef(null);
+    useEffect(() => {
+	if (session == null || searches == null || searches.length == 0) {
+	    return;
+	}
+	if (search != null) {
+	    searchFallbackRef.current = null;
+	    return;
+	}
+	const first = searches[0].name;
+	if (searchFallbackRef.current == first) return;
+	searchFallbackRef.current = first;
+	updateSession(session, setSession, {...session, search: first});
+    }, [session, setSession, searches, search]);
 
     if (session == null) {
 	console.log("session null, skip rendering contents");
@@ -734,15 +884,25 @@ const ObsStage = ({setSession}) => {
 	return null;
     };
 
-    const search = searchQ.data.find((i) => (i.name == session.search))
+    const targetByName = (name) => targets.find((t) => t.name == name);
+    const coordsOf = (obj) => obj != null && !obj.ss_obj
+	  ? {ra: obj.ra, dec: obj.dec} : null;
 
-    const paths = search.TargetObjects.map(obj =>
-	<TargetPath target={obj.name} pos={pos} onHover={setHovered}>
+    // Every matched object gets a path while the search is small; a
+    // large search draws only the hovered/tapped object's path.
+    const pathTargets = targets.length <= MAX_PATHS_ALWAYS ? targets
+	  : targets.filter((t) => hovered?.target === t.name);
+    const paths = pathTargets.map(obj =>
+	<TargetPath key={obj.name} target={obj.name} pos={pos}
+		    coords={coordsOf(obj)} onHover={setHovered}>
 	</TargetPath>)
 
-    const targets = search.TargetObjects.map(obj =>
-	<Target target={obj.name} pos={pos} onHover={setHovered}>
-	</Target>)
+    // The hovered result's candidate record and batch entry, for its
+    // tooltip; both null when the Sun (or nothing) is hovered.
+    const hoveredObj = hovered?.type === 'target'
+	  ? targetByName(hovered.target) : null;
+    const hoveredEntry = hoveredObj != null
+	  ? entries.find((e) => e.name == hoveredObj.name) : null;
 
     // Construct the view of the sky. The elements later in the list are
     // drawn on top of the earlier ones, so we want the objects on
@@ -754,16 +914,24 @@ const ObsStage = ({setSession}) => {
 		<CoordGrid>
 		</CoordGrid>
 		{paths}
-		{targets}
+		<ResultMarkers targets={targets} entries={entries}
+			       onHover={setHovered}>
+		</ResultMarkers>
 		<TargetPath target="Sun" pos={pos} onHover={setHovered}>
 		</TargetPath>
 		<Target pos={pos} target="Sun" fill="yellow" onHover={setHovered}>
 		</Target>
-		{hovered?.type === 'target' &&
+		{hovered?.type === 'target' && hoveredObj == null &&
 		 <HoveredTooltip target={hovered.target} pos={pos}>
 		 </HoveredTooltip>}
+		{hoveredEntry != null &&
+		 <HoveredTooltip target={hoveredObj.name} pos={pos}
+				 info={hoveredObj} entry={hoveredEntry}>
+		 </HoveredTooltip>}
 		{hovered?.type === 'segment' &&
-		 <HoveredSegmentTooltip target={hovered.target} startIndex={hovered.startIndex} pos={pos}>
+		 <HoveredSegmentTooltip target={hovered.target}
+					startIndex={hovered.startIndex} pos={pos}
+					coords={coordsOf(targetByName(hovered.target))}>
 		 </HoveredSegmentTooltip>}
 	    </Layer>
 	   )

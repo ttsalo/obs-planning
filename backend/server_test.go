@@ -194,8 +194,10 @@ func TestPositionValidate(t *testing.T) {
 	{"max az too high", func(p *Position) { p.MaxAz = 361 }, false},
 	{"min alt too low", func(p *Position) { p.MinAlt = -91 }, false},
 	{"max alt too high", func(p *Position) { p.MaxAlt = 91 }, false},
-	{"inverted az window", func(p *Position) {
-	    p.MinAz = 270; p.MaxAz = 90 }, false},
+	// Azimuth is circular: a maximum below the minimum wraps through
+	// north rather than being an error.
+	{"wrapping az window", func(p *Position) {
+	    p.MinAz = 270; p.MaxAz = 90 }, true},
 	{"inverted alt window", func(p *Position) {
 	    p.MinAlt = 40; p.MaxAlt = 20 }, false},
     }
@@ -284,6 +286,24 @@ func TestCreatePosition(t *testing.T) {
     assert.Equal(t, float64(360), created.MaxAz)
     assert.Equal(t, float64(90), created.MaxAlt)
     assert.Contains(t, positionNames(t), "Kuusamo")
+}
+
+// A window from 125 through north to 45 is stored as given, not
+// rejected or normalised.
+func TestCreatePositionWrappingAzimuth(t *testing.T) {
+    created := createPosition(t,
+	`{"name":"Wrapping","lat":60,"lon":25,"min_az":125,"max_az":45,`+
+	`"min_alt":0,"max_alt":90}`)
+    defer dropPosition(created.ID)
+
+    assert.Equal(t, float64(125), created.MinAz)
+    assert.Equal(t, float64(45), created.MaxAz)
+    for _, p := range listPositions(t) {
+	if p.ID == created.ID {
+	    assert.Equal(t, float64(125), p.MinAz)
+	    assert.Equal(t, float64(45), p.MaxAz)
+	}
+    }
 }
 
 func TestCreatePositionInvalid(t *testing.T) {

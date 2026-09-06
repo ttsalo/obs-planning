@@ -194,9 +194,9 @@ export function PositionsDialog({open, onClose, session, setSession}) {
     // A numeric field of the position form. The min/max match the
     // server's validation, but they only clamp the spinner and the
     // blurred value, so the server stays the real check.
-    const numberField = (label, name, min, max) =>
+    const numberField = (label, name, min, max, extra = null) =>
 	  <Col span={12}>
-	      <Form.Item label={label} name={name}
+	      <Form.Item label={label} name={name} extra={extra}
 			 rules={[{required: true,
 				  message: `${label} is required`}]}>
 		  <InputNumber min={min} max={max} style={{width: '100%'}}>
@@ -218,7 +218,8 @@ export function PositionsDialog({open, onClose, session, setSession}) {
 	      </Row>
 	      <Row gutter={16}>
 		  {numberField("Min azimuth", "min_az", 0, 360)}
-		  {numberField("Max azimuth", "max_az", 0, 360)}
+		  {numberField("Max azimuth", "max_az", 0, 360,
+			       "Smaller than the minimum wraps through north, e.g. 125 → 45")}
 	      </Row>
 	      <Row gutter={16}>
 		  {numberField("Min altitude", "min_alt", -90, 90)}

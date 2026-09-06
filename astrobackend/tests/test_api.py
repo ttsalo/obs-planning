@@ -277,3 +277,66 @@ def test_get_obj_timeseries_500_is_logged(app, monkeypatch, caplog):
     assert "astro-timeseries-fail" in joined
     assert "unhandled-exception" in joined
     assert "simulated astropy failure" in joined
+
+
+# --- batched positions and fixed-object paths -------------------------------
+
+M31 = {"name": "M31", "ss_obj": False, "ra": 10.68, "dec": 41.27}
+
+
+def test_get_objs_mixed_batch(client):
+    response = client.post("/api/get-objs", json={
+        "lat": 60, "lon": 24, "time": "2025-12-10T22:42:33.015Z",
+        "targets": [{"name": "Mars", "ss_obj": True},
+                    {"name": "Moon", "ss_obj": True}, M31]})
+    assert response.status_code == 200
+    results = response.json["results"]
+    assert [r["name"] for r in results] == ["Mars", "Moon", "M31"]
+    mars, moon, m31 = results
+    assert isinstance(mars["radius"], float)
+    assert "illumination" not in mars
+    assert isinstance(moon["radius"], float)
+    assert 0.0 <= moon["illumination"] <= 1.0
+    assert isinstance(moon["waxing"], bool)
+    assert "radius" not in m31
+    assert isinstance(m31["alt"], float)
+    assert isinstance(m31["az"], float)
+
+
+def test_get_objs_matches_get_obj(client):
+    common = {"lat": 60, "lon": 24, "time": "2025-12-10T22:42:33.015Z"}
+    single = client.post("/api/get-obj", json={"target": "jupiter", **common})
+    batch = client.post("/api/get-objs", json={
+        **common, "targets": [{"name": "Jupiter", "ss_obj": True}]})
+    assert batch.status_code == 200
+    for key in ("alt", "az", "radius"):
+        assert batch.json["results"][0][key] == single.json[key]
+
+
+def test_get_objs_validation(client):
+    common = {"lat": 60, "lon": 24, "time": "2025-12-10T22:42:33.015Z"}
+    r = client.post("/api/get-objs", json={
+        **common, "targets": [{"name": "Pluto", "ss_obj": True}]})
+    assert r.status_code == 400
+    r = client.post("/api/get-objs", json={
+        **common, "targets": [{"name": "X", "ss_obj": False, "ra": 10}]})
+    assert r.status_code == 400
+    r = client.post("/api/get-objs", json={**common, "targets": []})
+    assert r.status_code == 200
+    assert r.json["results"] == []
+
+
+def test_get_obj_timeseries_fixed_object(client):
+    response = client.post("/api/get-obj-timeseries", json={
+        "target": "M31", "ra": 10.68, "dec": 41.27, "lat": 60, "lon": 24,
+        "timespan": "day", "time": "2025-12-10T12:00:00Z"})
+    assert response.status_code == 200
+    series = response.json["series"]
+    assert len(series) == 48
+    alts = [pt["alt"] for pt in series]
+    # Dec 41.27 from latitude 60: culminates at 90 - (60 - 41.27) = 71.27
+    # and never sets (lower culmination at 41.27 + 60 - 90 = 11.27).
+    assert max(alts) == pytest.approx(71.27, abs=1.0)
+    assert min(alts) > 10.0
+    assert all(isinstance(pt["sun_alt"], float) for pt in series)
+    assert series[0]["ts"].endswith("Z")

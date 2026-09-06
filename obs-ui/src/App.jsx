@@ -7,6 +7,7 @@ import axios from 'axios';
 import ObsStage from './obs.jsx';
 import { SessionContext, StageContext } from './session.jsx'
 import PositionsDialog from './positions.jsx'
+import SearchesDialog, { useSearches } from './searches.jsx'
 import { useAstroBase } from './config.jsx'
 
 const App = () => {
@@ -122,10 +123,21 @@ const App = () => {
 	setIsModalOpen(true);
     };
 
+    const [isSearchesOpen, setIsSearchesOpen] = useState(false);
+
     // The session names the selected position; until it has loaded
     // there's nothing to name yet.
     const positionLabel = session == null ? "Loading..."
 	  : session.position || "(no position)";
+
+    // Likewise for the search, except that the name the session holds
+    // may resolve to nothing once the user has deleted every search
+    // (ObsStage's fallback only helps while one is left).
+    const searchQ = useSearches(session);
+    const searchLabel = session == null ? "Loading..."
+	  : (searchQ.data != null &&
+	     !searchQ.data.find((s) => s.name == session.search))
+	  ? "(no search)" : session.search || "(no search)";
 
 
     const onTimeChange = (time, timeString) => {
@@ -194,6 +206,26 @@ const App = () => {
 				       session={session}
 				       setSession={setSession}>
 				   </PositionsDialog>
+				   <Button type="text"
+					   onClick={() => setIsSearchesOpen(true)}>
+				       <Typography.Text strong={true}>
+					   Search:
+				       </Typography.Text>
+				       <Typography.Text
+					   ellipsis={true}
+					   style={{display: 'inline-block',
+						   verticalAlign: 'bottom',
+						   maxWidth: 200}}>
+					   {searchLabel}
+				       </Typography.Text>
+				   </Button>
+				   <SearchesDialog
+				       open={isSearchesOpen}
+				       onClose={() => setIsSearchesOpen(false)}
+				       session={session}
+				       setSession={setSession}
+				       shownDate={stageSize.get("date")}>
+				   </SearchesDialog>
 			       </Space>
 			   </Flex>
 		       </ConfigProvider>

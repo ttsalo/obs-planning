@@ -2,6 +2,7 @@ import logging
 import math
 import traceback
 import uuid
+from datetime import timedelta
 from functools import lru_cache
 
 import numpy as np
@@ -15,7 +16,7 @@ from werkzeug.exceptions import HTTPException
 from astropy import units as u
 from astropy.time import Time
 from astropy.coordinates import solar_system_ephemeris, EarthLocation, AltAz
-from astropy.coordinates import get_body, GeocentricMeanEcliptic
+from astropy.coordinates import get_body, GeocentricMeanEcliptic, SkyCoord
 from astropy.utils import iers
 
 # Prevent astropy from downloading + CDS-parsing IERS_A on the WSGI
@@ -26,7 +27,9 @@ from astropy.utils import iers
 iers.conf.auto_download = False
 iers.conf.iers_degraded_accuracy = "ignore"
 
+import catalog
 import schemas
+from schemas import as_utc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,7 +69,13 @@ swag = Swagger(app, template=spec.to_flasgger(
         definitions=[schemas.GetObjResultSchema,
                      schemas.GetObjPostSchema,
                      schemas.GetObjTSPostSchema,
-                     schemas.GetObjTSResultSchema]))
+                     schemas.GetObjTSResultSchema,
+                     schemas.ResolveTargetsPostSchema,
+                     schemas.ResolveTargetsResultSchema,
+                     schemas.FilterTargetsPostSchema,
+                     schemas.FilterTargetsResultSchema,
+                     schemas.GetObjsPostSchema,
+                     schemas.GetObjsResultSchema]))
 
 
 @app.route("/")
@@ -103,6 +112,12 @@ get_obj_post_schema = schemas.GetObjPostSchema()
 get_obj_result_schema = schemas.GetObjResultSchema()
 get_obj_ts_post_schema = schemas.GetObjTSPostSchema()
 get_obj_ts_result_schema = schemas.GetObjTSResultSchema()
+resolve_targets_post_schema = schemas.ResolveTargetsPostSchema()
+resolve_targets_result_schema = schemas.ResolveTargetsResultSchema()
+filter_targets_post_schema = schemas.FilterTargetsPostSchema()
+filter_targets_result_schema = schemas.FilterTargetsResultSchema()
+get_objs_post_schema = schemas.GetObjsPostSchema()
+get_objs_result_schema = schemas.GetObjsResultSchema()
 
 
 # Physical radii of the solar-system objects we serve, in km.
@@ -175,6 +190,24 @@ def _moon_phase(t, loc, moon, moon_aa):
         math.cos(a_m) * math.sin(a_s)
         - math.sin(a_m) * math.cos(a_s) * math.cos(daz))) % 360
     return {"illumination": k, "waxing": waxing, "bright_limb_angle": chi}
+
+
+def _fixed_altaz(ras, decs, times, loc):
+    """Altitude and azimuth (degrees) of fixed ICRS objects.
+
+    One vectorized transform for the whole list: for a scalar `times`
+    the arrays are shaped (n_obj,), for an array `times` (n_obj, n_t),
+    via astropy's broadcasting of the coordinate and obstime shapes.
+    """
+    coords = SkyCoord(ra=np.atleast_1d(np.asarray(ras, dtype=float)) * u.deg,
+                      dec=np.atleast_1d(np.asarray(decs, dtype=float)) * u.deg,
+                      frame="icrs")
+    if times.isscalar:
+        aa = coords.transform_to(AltAz(obstime=times, location=loc))
+    else:
+        aa = coords[:, np.newaxis].transform_to(
+            AltAz(obstime=times[np.newaxis, :], location=loc))
+    return np.asarray(aa.alt.deg), np.asarray(aa.az.deg)
 
 
 @lru_cache(maxsize=64)
@@ -264,11 +297,17 @@ def get_obj_timeseries():
         start = Time(data["time"])
         times = start + np.arange(TS_N_SAMPLES) * TS_STEP_SECONDS * u.s
 
-        target_aa, target_dist_km = _compute_altaz(data["target"], times, loc)
-        target_alt = target_aa.alt.deg
-        target_az = target_aa.az.deg
+        fixed = data.get("ra") is not None and data.get("dec") is not None
+        if fixed:
+            # A fixed object: the target string is only a label.
+            alts, azs = _fixed_altaz([data["ra"]], [data["dec"]], times, loc)
+            target_alt, target_az = alts[0], azs[0]
+        else:
+            target_aa, target_dist_km = _compute_altaz(data["target"], times, loc)
+            target_alt = target_aa.alt.deg
+            target_az = target_aa.az.deg
 
-        if data["target"].lower() == "sun":
+        if not fixed and data["target"].lower() == "sun":
             sun_radius_deg = _apparent_radius_deg("sun", target_dist_km)
             sun_alt_series = target_alt + sun_radius_deg
         else:
@@ -296,3 +335,258 @@ def get_obj_timeseries():
         )
         raise
 
+
+
+# --- Target searches --------------------------------------------------------
+
+# Maximum altitude of the Sun's upper limb for each brightness limit;
+# None means no limit. Same thresholds as the frontend's altToBrightness.
+BRIGHTNESS_SUN_ALT = {"N": -18.0, "AT": -12.0, "NT": -6.0, "CT": 0.0, "D": None}
+
+
+def _error(status, code, message):
+    return jsonify({"error": code, "message": message}), status
+
+
+@app.route("/api/resolve-targets", methods=['POST'], swag=True)
+def resolve_targets():
+    """
+    Resolve a target set to candidate objects
+    ---
+    description:
+      Turn a target set (the planets, the Messier objects, double stars
+      at or brighter than a magnitude, or a list of names) into candidate
+      objects with coordinates, magnitude and type. Applies no observing
+      criteria; see /api/filter-targets for those. Needs SIMBAD for
+      everything but the planets.
+    parameters:
+      - name: body
+        in: body
+        required: true
+        description: The target set
+        schema:
+          $ref: '#/definitions/ResolveTargetsPost'
+    responses:
+      200:
+        description: Candidates, their count, and names not found.
+        schema:
+          $ref: '#/definitions/ResolveTargetsResult'
+      400:
+        description: Invalid set, or one that matches too many objects.
+      502:
+        description: SIMBAD could not be reached.
+    """
+    try:
+        data = resolve_targets_post_schema.load(request.json)
+    except Exception as err:
+        return jsonify(err.messages), 400
+
+    target_set = data["set"]
+    kind = target_set["kind"]
+    max_magnitude = target_set.get("max_magnitude")
+    names = [n for n in target_set.get("names") or [] if n.strip()]
+    if kind == "double_stars" and max_magnitude is None:
+        return _error(400, "invalid", "Double stars need a maximum magnitude")
+    if kind == "names" and not names:
+        return _error(400, "invalid", "A name list needs at least one name")
+
+    try:
+        candidates, unresolved = catalog.resolve_set(kind, max_magnitude, names)
+    except catalog.TooManyCandidates as err:
+        return _error(400, "too_many", str(err))
+    except catalog.CatalogUnavailable as err:
+        return _error(502, "catalog", str(err))
+
+    return jsonify(resolve_targets_result_schema.dump(
+        {"candidates": candidates, "count": len(candidates),
+         "unresolved": unresolved})), 200
+
+
+def _window_samples(windows):
+    """Every 30 minutes from each window's start, the end instant
+    included, concatenated over the windows; naive UTC datetimes."""
+    samples = []
+    for window in windows:
+        start, end = as_utc(window["start"]), as_utc(window["end"])
+        steps = int((end - start).total_seconds() // TS_STEP_SECONDS)
+        for k in range(steps + 1):
+            samples.append(start + timedelta(seconds=k * TS_STEP_SECONDS))
+        if samples[-1] != end:
+            samples.append(end)
+    return samples
+
+
+def _az_in_window(az, obs_window):
+    """Elementwise: is the azimuth inside the position's azimuth limits?
+    Azimuth is circular, so a maximum below the minimum wraps through
+    north (125 -> 45 covers south-east round to north-east); equal limits
+    match nothing. Same rule as the frontend's azInWindow."""
+    lo, hi = obs_window["min_az"], obs_window["max_az"]
+    if lo <= hi:
+        return (az > lo) & (az < hi)
+    return (az > lo) | (az < hi)
+
+
+def _check_candidates(candidates):
+    """The 400 message for a candidate the filter can't compute, or None."""
+    for c in candidates:
+        if c["ss_obj"]:
+            if c["name"].lower() not in OBJ_RADII_KM:
+                return f"Unknown solar-system body {c['name']!r}"
+        elif c.get("ra") is None or c.get("dec") is None:
+            return f"Candidate {c['name']!r} needs ra and dec"
+    return None
+
+
+def _candidates_altaz(candidates, times, loc):
+    """(n_obj, n_t) altitude and azimuth arrays for a mixed list."""
+    n = len(candidates)
+    alt = np.empty((n, len(times)))
+    az = np.empty((n, len(times)))
+    fixed = [i for i, c in enumerate(candidates) if not c["ss_obj"]]
+    if fixed:
+        alts, azs = _fixed_altaz([candidates[i]["ra"] for i in fixed],
+                                 [candidates[i]["dec"] for i in fixed],
+                                 times, loc)
+        alt[fixed] = alts
+        az[fixed] = azs
+    for i, c in enumerate(candidates):
+        if c["ss_obj"]:
+            aa, _ = _compute_altaz(c["name"].lower(), times, loc)
+            alt[i] = aa.alt.deg
+            az[i] = aa.az.deg
+    return alt, az
+
+
+@app.route("/api/filter-targets", methods=['POST'], swag=True)
+def filter_targets():
+    """
+    Flag which candidates are observable in the given windows
+    ---
+    description:
+      Sample each observing window every 30 minutes (end included) and
+      report, for each candidate, whether at any sample it is both
+      visible per the visibility criterion and the sky is at most as
+      bright as the brightness limit. Never consults the catalog.
+    parameters:
+      - name: body
+        in: body
+        required: true
+        description: Candidates, position, windows and criteria
+        schema:
+          $ref: '#/definitions/FilterTargetsPost'
+    responses:
+      200:
+        description: One matched flag per candidate, in request order.
+        schema:
+          $ref: '#/definitions/FilterTargetsResult'
+      400:
+        description: Invalid input.
+    """
+    try:
+        data = filter_targets_post_schema.load(request.json)
+    except Exception as err:
+        return jsonify(err.messages), 400
+
+    candidates = data["candidates"]
+    visibility = data["visibility"]
+    threshold = BRIGHTNESS_SUN_ALT[data["max_brightness"]]
+    obs_window = data.get("obs_window")
+    if visibility == "window" and obs_window is None:
+        return _error(400, "invalid",
+                      "Visibility 'window' needs the position's obs_window")
+    problem = _check_candidates(candidates)
+    if problem is not None:
+        return _error(400, "invalid", problem)
+
+    n = len(candidates)
+    if n == 0 or not data["windows"] or (visibility == "none" and threshold is None):
+        return jsonify(filter_targets_result_schema.dump(
+            {"matched": [True] * n, "count": n})), 200
+
+    loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
+    times = Time(_window_samples(data["windows"]))
+
+    alt, az = _candidates_altaz(candidates, times, loc)
+
+    if visibility == "window":
+        visible = ((alt > obs_window["min_alt"]) & (alt < obs_window["max_alt"])
+                   & _az_in_window(az, obs_window))
+    elif visibility == "horizon":
+        visible = alt > 0
+    else:
+        visible = np.ones_like(alt, dtype=bool)
+
+    if threshold is None:
+        dark = np.ones(len(times), dtype=bool)
+    else:
+        sun_aa, sun_dist_km = _compute_altaz("sun", times, loc)
+        sun_alt = sun_aa.alt.deg + _apparent_radius_deg("sun", sun_dist_km)
+        dark = np.asarray(sun_alt) < threshold
+
+    matched = (visible & dark[np.newaxis, :]).any(axis=1)
+    return jsonify(filter_targets_result_schema.dump(
+        {"matched": [bool(m) for m in matched],
+         "count": int(matched.sum())})), 200
+
+
+@app.route("/api/get-objs", methods=['POST'], swag=True)
+def get_objs():
+    """
+    Return the altitude and azimuth of a list of targets
+    ---
+    description:
+      Like /api/get-obj for many targets at once, in request order.
+      Solar-system bodies (by name) also get their apparent radius, and
+      the moon its phase fields; fixed objects (ra, dec) get altitude and
+      azimuth only.
+    parameters:
+      - name: body
+        in: body
+        required: true
+        description: Observation place, time and targets
+        schema:
+          $ref: '#/definitions/GetObjsPost'
+    responses:
+      200:
+        description: One result per target, in request order.
+        schema:
+          $ref: '#/definitions/GetObjsResult'
+      400:
+        description: Invalid input.
+    """
+    try:
+        data = get_objs_post_schema.load(request.json)
+    except Exception as err:
+        return jsonify(err.messages), 400
+
+    targets = data["targets"]
+    problem = _check_candidates(targets)
+    if problem is not None:
+        return _error(400, "invalid", problem)
+
+    loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
+    t = Time(data["time"])
+    results = [None] * len(targets)
+
+    fixed = [i for i, tg in enumerate(targets) if not tg["ss_obj"]]
+    if fixed:
+        alts, azs = _fixed_altaz([targets[i]["ra"] for i in fixed],
+                                 [targets[i]["dec"] for i in fixed], t, loc)
+        for i, a, z in zip(fixed, alts, azs):
+            results[i] = {"name": targets[i]["name"],
+                          "alt": float(a), "az": float(z)}
+
+    for i, tg in enumerate(targets):
+        if not tg["ss_obj"]:
+            continue
+        body = tg["name"].lower()
+        obj, aa, dist_km = _compute_body(body, t, loc)
+        result = {"name": tg["name"], "alt": float(aa.alt.deg),
+                  "az": float(aa.az.deg),
+                  "radius": _apparent_radius_deg(body, dist_km)}
+        if body == "moon":
+            result.update(_moon_phase(t, loc, obj, aa))
+        results[i] = result
+
+    return jsonify(get_objs_result_schema.dump({"results": results})), 200
