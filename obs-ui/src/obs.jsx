@@ -31,8 +31,8 @@ const objStrokeWidth = 1.2;
 
 // A search with this many matched objects or fewer gets a path for
 // every one of them, as the planets always have; above it only the
-// hovered object's path is drawn so a Messier-sized search stays
-// readable.
+// hovered object's path and the ones toggled on by clicking are drawn,
+// so a Messier-sized search stays readable.
 const MAX_PATHS_ALWAYS = 10;
 
 // Catalog objects have no artistic marker of their own; they get a
@@ -133,9 +133,12 @@ function moonPhaseLabel(illumination, waxing) {
 }
 
 // Shared tooltip box: a Konva Label/Tag/Text positioned at (x,y), used by
-// both TargetTooltip (marker hover) and SegmentTooltip (path hover).
+// both TargetTooltip (marker hover) and SegmentTooltip (path hover). It
+// is anchored on the very thing it describes, so it must not take part in
+// hit detection: a listening tag would cover the hovered marker and eat
+// the click that toggles its path.
 function InfoTooltip({x, y, lines, pointerDirection = "up", opacity = 0.9}) {
-    return (<Label x={x} y={y} opacity={opacity}>
+    return (<Label x={x} y={y} opacity={opacity} listening={false}>
 		<Tag fill="white" pointerDirection={pointerDirection}
 		     pointerHeight={8} pointerWidth={5} stroke="black"
 		     strokeWidth={1} lineJoin="round">
@@ -311,8 +314,9 @@ function useBatchPositions(targets, pos, stageSize) {
 // Markers for the selected search's matched objects, entries being
 // the batch request's results in the targets' order: the artistic
 // ObsObject for solar-system bodies, a marker by catalog type for the
-// rest. Reports hover the same way Target does.
-function ResultMarkers({targets, entries, onHover}) {
+// rest. Reports hover the same way Target does; a click or tap
+// toggles the object's full path through onToggle.
+function ResultMarkers({targets, entries, onHover, onToggle}) {
     const stageSize = useContext(StageContext);
 
     const markers = entries.map((entry, i) => {
@@ -323,6 +327,11 @@ function ResultMarkers({targets, entries, onHover}) {
 	const hover = {type: 'target', target: obj.name};
 	const same = (prev) =>
 	      prev?.type === 'target' && prev.target === obj.name;
+	// Konva fires click only for a mouse gesture and tap only for
+	// a touch one -- it preventDefaults touchstart on a listening
+	// shape, so no synthetic click follows a tap -- and one
+	// gesture therefore never toggles the path twice. The tap
+	// also opens the tooltip that the mouse gets from hovering.
 	return (<Group key={obj.name}
 		       onMouseEnter={(e) => {
 			   onHover(hover);
@@ -332,7 +341,11 @@ function ResultMarkers({targets, entries, onHover}) {
 			   onHover((prev) => same(prev) ? null : prev);
 			   e.target.getStage().container().style.cursor = 'default';
 		       }}
-		       onTap={() => onHover((prev) => same(prev) ? null : hover)}>
+		       onClick={() => onToggle(obj.name)}
+		       onTap={() => {
+			   onHover((prev) => same(prev) ? null : hover);
+			   onToggle(obj.name);
+		       }}>
 		    {obj.ss_obj
 		     ? <ObsObject target={obj.name} x={x} y={y}
 				  radius={(entry.radius || 0) * stageSize.get("zoom")
@@ -477,7 +490,11 @@ function HoveredSegmentTooltip({target, startIndex, pos, coords = null}) {
 // Component to plot the future path of a given target in the sky,
 // seen from the geographic location in the settings. coords is the
 // {ra, dec} of a fixed catalog object, null for solar-system bodies.
-function TargetPath({target, pos, onHover, coords = null}) {
+// full draws the whole 24-hour track of an object the user has toggled
+// the path on for: no clipping to the observation window. The daytime
+// band stays a Sun-only thing, so in daylight such a path is drawn as
+// the thin inner track alone.
+function TargetPath({target, pos, onHover, coords = null, full = false}) {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
 
@@ -485,6 +502,10 @@ function TargetPath({target, pos, onHover, coords = null}) {
 
     const brightnessToColor =
 	  ["black", "#0000C0", "#4040FF", "#8080FF", "yellow"];
+
+    // The Sun is drawn whatever the observation window says; a
+    // toggled-on path ignores the window by request.
+    const ignoreWindow = (target == "Sun") || full;
 
     // The line segment is crossing a brightness transition, interpolate
     // the exact point where that happens
@@ -555,7 +576,8 @@ function TargetPath({target, pos, onHover, coords = null}) {
 	    data.series[elem].sun_alt);
 	ts = new Date(data.series[elem].ts);
 	brightness = altToBrightness(data.series[elem]);
-	vis = (target == "Sun") || checkObsWindow(pos, data.series[elem].alt, data.series[elem].az);
+	vis = ignoreWindow || checkObsWindow(pos, data.series[elem].alt,
+					     data.series[elem].az);
 
 	wrap = (prev_x != null && prev_x > x);
 	vis_change = (vis != null && prev_vis != null && vis != prev_vis);
@@ -620,6 +642,9 @@ function TargetPath({target, pos, onHover, coords = null}) {
 	outer_segments.push([brightness, outer_points]);
     }
 
+    // Daylight gets no bright band except for the Sun itself, toggled
+    // on or not: the inner track alone says where the object is while
+    // the sky is too bright to observe it.
     const outerSegs = outer_segments.filter(
 	seg => target == "Sun" || seg[0] < 4).map(seg =>
 	<Line points={seg[1]} strokeWidth={5}
@@ -634,8 +659,10 @@ function TargetPath({target, pos, onHover, coords = null}) {
 
     var transitionEvs = null;
     if (target == "Sun") {
+	// Decorative like the tooltips: a listening label would cover
+	// whatever marker or path happens to lie under it.
 	transitionEvs = transition_events.map(ev =>
-	    <Label x={ev.x} y={ev.y} opacity={0.75}>
+	    <Label x={ev.x} y={ev.y} opacity={0.75} listening={false}>
 		<Tag fill="white" pointerDirection="up" pointerHeight={8}
 		     pointerWidth={5} stroke="black" strokeWidth={1}>
 		</Tag>
@@ -649,10 +676,10 @@ function TargetPath({target, pos, onHover, coords = null}) {
     }
 
     // Invisible half-hour-interval hover targets, one Line per entry in
-    // hit_segments. Rendered last (after transitionEvs) so they take hit
-    // priority over everything else, including the Sun's persistent
-    // transition labels -- unlike a visible line, there's no harm in an
-    // invisible hit target winning over a label drawn on top of it.
+    // hit_segments. Rendered last so they take hit priority over the
+    // visible path lines of this same path -- unlike a visible line,
+    // there's no harm in an invisible hit target winning over what is
+    // drawn on top of it.
     const hitSegs = hit_segments.map(seg =>
 	<Line points={seg.points} strokeWidth={0} hitStrokeWidth={20}
 	      stroke="black"
@@ -776,6 +803,16 @@ const ObsStage = ({setSession}) => {
     // -- unified so a marker tooltip and a path-segment tooltip can never
     // both be open at once.
     const [hovered, setHovered] = useState(null);
+    // Names of the objects whose path the user has toggled on by
+    // clicking (or tapping) the marker: those are drawn for the whole
+    // 24 hours, ignoring the observation window, and are drawn even in
+    // a search too large for always-on paths.
+    const [pinned, setPinned] = useState(() => new Set());
+    const togglePinned = (name) => setPinned((prev) => {
+	const next = new Set(prev);
+	if (next.has(name)) { next.delete(name); } else { next.add(name); }
+	return next;
+    });
 
     stageSize.forEach((value, key) => {
 	console.log(`${key} = ${value}`);
@@ -854,6 +891,14 @@ const ObsStage = ({setSession}) => {
 	updateSession(session, setSession, {...session, search: first});
     }, [session, setSession, searches, search]);
 
+    /* A toggled-on path names an object of the selected search, so
+       switching searches starts the new one with none of them on.
+       Returning the previous (empty) set unchanged keeps this from
+       causing a re-render on mount and on unrelated session updates. */
+    useEffect(() => {
+	setPinned((prev) => prev.size == 0 ? prev : new Set());
+    }, [session?.search]);
+
     if (session == null) {
 	console.log("session null, skip rendering contents");
 	return null;
@@ -889,12 +934,15 @@ const ObsStage = ({setSession}) => {
 	  ? {ra: obj.ra, dec: obj.dec} : null;
 
     // Every matched object gets a path while the search is small; a
-    // large search draws only the hovered/tapped object's path.
+    // large search draws only the hovered/tapped object's path, plus the
+    // toggled-on ones, which stay whether they're hovered or not.
     const pathTargets = targets.length <= MAX_PATHS_ALWAYS ? targets
-	  : targets.filter((t) => hovered?.target === t.name);
+	  : targets.filter((t) => hovered?.target === t.name ||
+				  pinned.has(t.name));
     const paths = pathTargets.map(obj =>
 	<TargetPath key={obj.name} target={obj.name} pos={pos}
-		    coords={coordsOf(obj)} onHover={setHovered}>
+		    coords={coordsOf(obj)} onHover={setHovered}
+		    full={pinned.has(obj.name)}>
 	</TargetPath>)
 
     // The hovered result's candidate record and batch entry, for its
@@ -905,20 +953,22 @@ const ObsStage = ({setSession}) => {
 	  ? entries.find((e) => e.name == hoveredObj.name) : null;
 
     // Construct the view of the sky. The elements later in the list are
-    // drawn on top of the earlier ones, so we want the objects on
-    // top of the paths except the sun path on top of everything but
-    // the sun itself so that the illumination labels aren't obscured.
-    // The hover tooltip is rendered last of all, so it always sits above
-    // every path/marker no matter which target it belongs to.
+    // drawn on top of the earlier ones and, just as importantly, take
+    // hit priority over them: the markers come after every path,
+    // including the Sun's, so that a path crossing a marker can't eat
+    // the click that toggles that object's path. The Sun's own marker
+    // is drawn over the results, and the hover tooltip last of all, so
+    // it always sits above every path/marker no matter which target it
+    // belongs to.
     return (<Layer>
 		<CoordGrid>
 		</CoordGrid>
 		{paths}
-		<ResultMarkers targets={targets} entries={entries}
-			       onHover={setHovered}>
-		</ResultMarkers>
 		<TargetPath target="Sun" pos={pos} onHover={setHovered}>
 		</TargetPath>
+		<ResultMarkers targets={targets} entries={entries}
+			       onHover={setHovered} onToggle={togglePinned}>
+		</ResultMarkers>
 		<Target pos={pos} target="Sun" fill="yellow" onHover={setHovered}>
 		</Target>
 		{hovered?.type === 'target' && hoveredObj == null &&

@@ -155,6 +155,26 @@ azimuths above the minimum or below the maximum. The sky view's path
 clipping, the rise and set times in the tooltips and the search filter
 all apply the same rule.
 
+### 0.12.1
+
+Observation target path toggle. Clicking -- or, on a touch screen,
+tapping -- an object in the sky view toggles its full path on and off.
+A toggled-on path ignores the visibility criteria that normally shape
+the drawing: it is drawn for the whole 24 hours, below the horizon and
+outside the position's observation window as well. Daylight is still
+drawn as the thin inner track alone -- the bright band stays reserved
+for the Sun -- so the observable hours remain the ones that stand
+out. Several objects can be
+toggled on at once, and in a search too large for always-on paths (more
+than ten matches) a toggled-on path stays drawn whether or not the
+object is hovered. Selecting another search clears the toggles.
+
+The markers are now drawn after every path, the Sun's included, so that
+a path crossing a marker can no longer take the click meant for the
+object; the hover tooltips and the Sun's twilight labels no longer take
+part in hit detection at all, a tooltip being anchored on the very
+marker it describes.
+
 ## Next steps
 
 - On-hover infobox for the objects
