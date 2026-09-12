@@ -14,8 +14,12 @@ A search SHALL consist of a name, a target set, an observing time window,
 an optional day range, a visibility criterion and a maximum sky brightness.
 The target set MUST be one of: `planets` (the Sun-system bodies the sky
 view already knows: Mercury, Venus, Moon, Mars, Jupiter, Saturn, Uranus,
-Neptune), `messier` (the 110 Messier objects, optionally limited to those
-at or brighter than a maximum visual magnitude), `category` (the objects
+Neptune), one of the well-known object lists — `messier` (the 110
+Messier objects), `caldwell` (the 109 Caldwell objects), `herschel400`
+(the 400 objects of the Herschel 400 observing program), `melotte` (the
+245 Melotte clusters) or `collinder` (the 471 Collinder clusters) — each
+optionally limited to those at or brighter than a maximum visual
+magnitude, `category` (the objects
 of one astronomical object category, identified by a catalog object-type
 code, at or brighter than a maximum visual magnitude, which MUST be
 given), or `names` (a non-empty list of object names, each non-empty
@@ -435,6 +439,34 @@ indicate that no search is selected.
 - **WHEN** the user has deleted all of their searches
 - **THEN** the sky view shows only the Sun and its path and the header
   reads "(no search)"
+
+### Requirement: Choosing an object list
+The add and edit forms SHALL offer the well-known object lists as one
+"object list" target-set choice with a dropdown of the lists (Messier,
+Caldwell, Herschel 400, Melotte, Collinder), defaulting to Messier, so
+the set choice stays a short row however many lists there are. The list
+chosen SHALL be stored as the search's set kind — the grouping exists only
+in the form — and a saved search of any list kind SHALL open for editing
+with the object-list choice and its list selected. Switching a search
+from one list to another SHALL discard its candidates like any other
+change of set, so the next evaluation resolves the new list. The list
+SHALL be named wherever the search's set is summarised.
+
+#### Scenario: Choose a list
+- **WHEN** the user selects the object-list set and picks Caldwell from
+  the list dropdown, then evaluates and saves
+- **THEN** the search is stored with set kind `caldwell` and the searches
+  list summarises its set as Caldwell objects
+
+#### Scenario: Edit a saved list search
+- **WHEN** the user opens a saved `herschel400` search for editing
+- **THEN** the form shows the object-list set selected with Herschel 400
+  in the list dropdown and the search's candidates are kept
+
+#### Scenario: Switch lists
+- **WHEN** the user changes a saved Messier search's list to Melotte
+- **THEN** the candidates are discarded and the next evaluation resolves
+  the Melotte list
 
 ### Requirement: Choosing an object category
 When the target set is an object category, the add and edit forms SHALL

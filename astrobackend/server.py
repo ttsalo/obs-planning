@@ -354,9 +354,10 @@ def resolve_targets():
     Resolve a target set to candidate objects
     ---
     description:
-      Turn a target set (the planets, the Messier objects, one object
-      category at or brighter than a magnitude, or a list of names) into
-      candidate objects with coordinates, magnitude and type. A category
+      Turn a target set (the planets, a well-known object list - Messier,
+      Caldwell, Herschel 400, Melotte or Collinder - one object category
+      at or brighter than a magnitude, or a list of names) into candidate
+      objects with coordinates, magnitude and type. A category
       is a SIMBAD object-type code and matches that type's subtypes too,
       for objects whose own type is in the same top-level branch of the
       hierarchy; each candidate is typed by its own catalogued type. A

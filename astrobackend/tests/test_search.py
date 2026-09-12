@@ -6,6 +6,7 @@ import pytest
 from astropy.table import Table, MaskedColumn
 
 import catalog
+import lists
 import server
 
 
@@ -133,7 +134,7 @@ def test_resolve_messier(client, monkeypatch):
 
     r = resolve(client, {"kind": "messier"})
     assert r.status_code == 200
-    assert asked == [catalog.MESSIER_IDS]
+    assert asked == [[simbad_id for _, simbad_id in lists.MESSIER]]
     names = [c["name"] for c in r.json["candidates"]]
     assert names == ["M 1", "M 13", "M 31", "M 45"]
     m1, m13, m31 = r.json["candidates"][:3]
@@ -168,6 +169,88 @@ def test_resolve_messier_is_cached_per_magnitude(client, monkeypatch):
     assert len(calls) == 1
     assert resolve(client, {"kind": "messier", "max_magnitude": 6}).status_code == 200
     assert len(calls) == 2
+
+
+def test_resolve_caldwell_by_ngc_id(client, monkeypatch):
+    """SIMBAD has no Caldwell numbering: the entries are asked for by
+    their NGC/IC ids and the candidates named by their Caldwell ones."""
+    asked = []
+
+    def fake(names):
+        asked.append(list(names))
+        return objects_table([
+            ("NGC 869", "NGC   869", 34.74, 57.13, 3.7, "OpC"),
+            ("NGC 7000", "NGC  7000", 314.70, 44.33, None, "Cl*"),
+        ])
+    monkeypatch.setattr(catalog, "_simbad_query_objects", fake)
+
+    r = resolve(client, {"kind": "caldwell"})
+    assert r.status_code == 200
+    assert asked == [[simbad_id for _, simbad_id in lists.CALDWELL]]
+    assert "NGC 869" in asked[0] and "NGC 7000" in asked[0]
+    assert "Mel 25" in asked[0]          # C 41, the Hyades
+    assert r.json["count"] == 2
+    c14, c20 = r.json["candidates"]
+    assert c14["name"] == "C 14"
+    assert c14["ra"] == pytest.approx(34.74)
+    assert c14["dec"] == pytest.approx(57.13)
+    assert c14["magnitude"] == pytest.approx(3.7)
+    assert c14["object_type"] == "Open cluster"
+    assert c20["name"] == "C 20"
+    assert c20["magnitude"] is None
+
+
+def test_resolve_list_skips_entries_simbad_does_not_know(client, monkeypatch):
+    """A missing row and a row without coordinates both drop out; the
+    rest keep the list's order."""
+    monkeypatch.setattr(catalog, "_simbad_query_objects",
+                        lambda names: objects_table([
+                            ("NGC 7789", "NGC  7789", 359.33, 56.73, 6.7, "OpC"),
+                            ("NGC 104", "NGC   104", 6.02, -72.08, 4.0, "GlC"),
+                            ("NGC 188", None, None, None, None, None),
+                        ]))
+    r = resolve(client, {"kind": "melotte"})
+    assert r.status_code == 200
+    assert [c["name"] for c in r.json["candidates"]] == ["Mel 1", "Mel 245"]
+
+
+def test_resolve_collinder_asks_by_alias_when_no_ngc_id(client, monkeypatch):
+    asked = []
+
+    def fake(names):
+        asked.append(list(names))
+        return objects_table([
+            ("Collinder 399", "Cl Collinder  399", 291.35, 20.18, 3.6, "Cl*"),
+            ("Trumpler 1", "Cl Trumpler    1", 23.93, 61.28, 8.1, "OpC"),
+            ("NGC 2818", "NGC  2818", 139.04, -36.63, 8.2, "OpC"),
+        ])
+    monkeypatch.setattr(catalog, "_simbad_query_objects", fake)
+
+    r = resolve(client, {"kind": "collinder"})
+    assert r.status_code == 200
+    assert "Collinder 399" in asked[0] and "Trumpler 1" in asked[0]
+    assert "Cr 399" not in asked[0]
+    # Asked once per distinct id even where two numbers share an object.
+    assert len(asked[0]) == len(set(asked[0])) < len(lists.COLLINDER)
+    assert [c["name"] for c in r.json["candidates"]] == [
+        "Cr 15", "Cr 206", "Cr 399"]
+    assert r.json["candidates"][2]["object_type"] == "Star cluster"
+
+
+def test_lists_are_well_formed():
+    assert {k: len(v) for k, v in lists.LISTS.items()} == {
+        "messier": 110, "caldwell": 109, "herschel400": 400,
+        "melotte": 245, "collinder": 471}
+    for kind, entries in lists.LISTS.items():
+        names = [name for name, _ in entries]
+        assert len(set(names)) == len(names), kind
+        for name, simbad_id in entries:
+            assert name == name.strip() and simbad_id == simbad_id.strip()
+            assert name and simbad_id
+    assert [n for n, _ in lists.CALDWELL] == [f"C {i}" for i in range(1, 110)]
+    assert [n for n, _ in lists.MELOTTE] == [f"Mel {i}" for i in range(1, 246)]
+    assert [n for n, _ in lists.COLLINDER] == [f"Cr {i}" for i in range(1, 472)]
+    assert all(n == i for n, i in lists.HERSCHEL_400)
 
 
 def test_resolve_category_double_stars(client, monkeypatch):
@@ -644,6 +727,18 @@ def test_resolve_names_live_simbad(client):
     m31 = r.json["candidates"][0]
     assert m31["ra"] == pytest.approx(10.68, abs=0.01)
     assert m31["dec"] == pytest.approx(41.27, abs=0.01)
+
+
+@pytest.mark.network
+def test_resolve_lists_live_simbad(client):
+    """Every entry of every list resolves in SIMBAD (lists.py was
+    written against that; this is the check to rerun if it drifts)."""
+    for kind, entries in lists.LISTS.items():
+        r = resolve(client, {"kind": kind})
+        assert r.status_code == 200, r.json
+        found = [c["name"] for c in r.json["candidates"]]
+        missing = [name for name, _ in entries if name not in found]
+        assert missing == [], f"{kind}: {missing}"
 
 
 @pytest.mark.network

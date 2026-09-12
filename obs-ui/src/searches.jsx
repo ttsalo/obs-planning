@@ -38,9 +38,23 @@ function usePositions(session) {
     });
 }
 
+/* The well-known object lists. Each is a set kind of its own to the
+   servers (set_kind is the flat code); the form groups them under one
+   "Object list" radio with this as its dropdown. */
+const listOptions = [
+    {value: 'messier', label: 'Messier'},
+    {value: 'caldwell', label: 'Caldwell'},
+    {value: 'herschel400', label: 'Herschel 400'},
+    {value: 'melotte', label: 'Melotte'},
+    {value: 'collinder', label: 'Collinder'},
+];
+const isListKind = (kind) => listOptions.some((o) => o.value == kind);
+const listLabel = (kind) => listOptions.find((o) => o.value == kind)?.label;
+
+// The form's radio group; 'list' stands for whichever list is picked.
 const setKindOptions = [
     {value: 'planets', label: 'Planets'},
-    {value: 'messier', label: 'Messier objects'},
+    {value: 'list', label: 'Object list'},
     {value: 'category', label: 'Object category'},
     {value: 'names', label: 'Names'},
 ];
@@ -70,7 +84,10 @@ export function setSummary(search) {
 	return `${n} name${n == 1 ? "" : "s"}`;
     }
     const label = search.set_kind == 'category'
-	  ? categoryLabel(search.otype) : kindLabel(search.set_kind);
+	  ? categoryLabel(search.otype)
+	  : isListKind(search.set_kind)
+	  ? `${listLabel(search.set_kind)} objects`
+	  : kindLabel(search.set_kind);
     return search.max_magnitude != null
 	? `${label} ≤ mag ${search.max_magnitude}` : label;
 }
@@ -96,10 +113,10 @@ function splitNames(text) {
 // Form values -> the search definition the servers understand.
 function toDefinition(values) {
     const kind = values.set_kind;
-    const hasMagnitude = kind == 'messier' || kind == 'category';
+    const hasMagnitude = kind == 'list' || kind == 'category';
     return {
 	name: values.name,
-	set_kind: kind,
+	set_kind: kind == 'list' ? values.list_kind : kind,
 	max_magnitude: hasMagnitude && values.max_magnitude != null
 	    ? values.max_magnitude : null,
 	otype: kind == 'category' ? (values.otype || "") : "",
@@ -117,9 +134,11 @@ function toDefinition(values) {
 
 // A saved search -> form values.
 function toFormValues(search) {
+    const isList = isListKind(search.set_kind);
     return {
 	name: search.name,
-	set_kind: search.set_kind,
+	set_kind: isList ? 'list' : search.set_kind,
+	list_kind: isList ? search.set_kind : 'messier',
 	max_magnitude: search.max_magnitude,
 	otype: currentCode(search.otype) || DEFAULT_CATEGORY,
 	names: (search.names || []).join("\n"),
@@ -133,7 +152,7 @@ function toFormValues(search) {
 }
 
 const newSearchDefaults = {
-    name: "", set_kind: 'planets', max_magnitude: null,
+    name: "", set_kind: 'planets', list_kind: 'messier', max_magnitude: null,
     otype: DEFAULT_CATEGORY, names: "",
     start_time: dayjs('22:00', 'HH:mm'), end_time: dayjs('02:00', 'HH:mm'),
     day_range: null, visibility: 'window', max_brightness: 'NT',
@@ -485,6 +504,12 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 				  message: 'Choose a target set'}]}>
 		  <Radio.Group options={setKindOptions}></Radio.Group>
 	      </Form.Item>
+	      {setKind == 'list' &&
+	       <Form.Item label="List" name="list_kind"
+			  rules={[{required: true,
+				   message: 'Choose an object list'}]}>
+		   <Select options={listOptions} style={{width: 200}}></Select>
+	       </Form.Item>}
 	      {setKind == 'category' &&
 	       <Form.Item label="Category" name="otype"
 			  rules={[{required: true,
@@ -497,7 +522,7 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 	      {/* SIMBAD carries a visual magnitude for hardly any nebula
 		  (M 42 has none), so a nebula category with the limit the
 		  set needs finds little; say so up front. */}
-	      {(setKind == 'messier' || setKind == 'category') &&
+	      {(setKind == 'list' || setKind == 'category') &&
 	       <Form.Item label="Maximum magnitude" name="max_magnitude"
 			  rules={[{required: setKind == 'category',
 				   message: 'A category needs a magnitude limit'}]}

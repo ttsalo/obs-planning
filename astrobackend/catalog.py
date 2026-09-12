@@ -13,6 +13,8 @@ from functools import lru_cache
 
 import numpy as np
 
+import lists
+
 log = logging.getLogger(__name__)
 
 # Bodies the astro backend computes itself (see server.OBJ_RADII_KM);
@@ -26,10 +28,11 @@ _SOLAR_SYSTEM_BY_LOWER = {name.lower(): name for name in SOLAR_SYSTEM}
 PLANETS = ["Mercury", "Venus", "Moon", "Mars", "Jupiter", "Saturn",
            "Uranus", "Neptune"]
 
-# The Messier catalogue is a fixed list of identifiers, so it is looked
-# up by name rather than searched: an identifier pattern search would
-# also match Minkowski's "M 1-1" planetary nebulae.
-MESSIER_IDS = [f"M {n}" for n in range(1, 111)]
+# The well-known object lists (Messier, Caldwell, ...) are the fixed
+# tables in lists.py: looked up by identifier, never searched, since an
+# identifier pattern search for "M %" would also match Minkowski's
+# "M 1-1" planetary nebulae.
+LISTS = lists.LISTS
 
 # Hard limit on candidates per set: this is what the filter endpoint and
 # the database are sized for.
@@ -199,16 +202,27 @@ def _resolve_planets():
     return [_solar_system_candidate(p) for p in PLANETS], []
 
 
-@lru_cache(maxsize=16)
-def _resolve_messier(max_magnitude):
-    table = _simbad_query_objects(tuple(MESSIER_IDS))
-    candidates = []
+@lru_cache(maxsize=32)
+def _resolve_list(kind, max_magnitude):
+    """One well-known list: every entry SIMBAD resolves, named by the
+    list's own designation rather than SIMBAD's main identifier."""
+    entries = LISTS[kind]
+    # A list can name the same object under two numbers; ask once.
+    ids = tuple(dict.fromkeys(simbad_id for _, simbad_id in entries))
+    table = _simbad_query_objects(ids)
+    by_requested = {}
     for row in table:
         requested = _cell(row, "user_specified_id")
-        if _cell(row, "ra") is None:
-            log.warning("simbad-unresolved messier id=%s", requested)
+        if requested is not None:
+            by_requested[str(requested).strip()] = row
+    candidates = []
+    for name, simbad_id in entries:
+        row = by_requested.get(simbad_id)
+        if row is None or _cell(row, "ra") is None:
+            log.warning("simbad-unresolved list=%s name=%s id=%s",
+                        kind, name, simbad_id)
             continue
-        candidate = _fixed_candidate(str(requested).strip(), row)
+        candidate = _fixed_candidate(name, row)
         if _within_magnitude(candidate, max_magnitude):
             candidates.append(candidate)
     return candidates, []
@@ -338,8 +352,8 @@ def resolve_set(kind, max_magnitude=None, names=(), otype=None):
     names). Raises TooManyCandidates or CatalogUnavailable."""
     if kind == "planets":
         candidates, unresolved = _resolve_planets()
-    elif kind == "messier":
-        candidates, unresolved = _resolve_messier(max_magnitude)
+    elif kind in LISTS:
+        candidates, unresolved = _resolve_list(kind, max_magnitude)
     elif kind == "category":
         candidates, unresolved = _resolve_category(otype, float(max_magnitude))
     elif kind == "names":
@@ -357,7 +371,7 @@ def resolve_set(kind, max_magnitude=None, names=(), otype=None):
 
 def clear_cache():
     _otype_paths.cache_clear()
-    _resolve_messier.cache_clear()
+    _resolve_list.cache_clear()
     _resolve_category.cache_clear()
     _resolve_names.cache_clear()
 

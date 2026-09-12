@@ -240,6 +240,22 @@ for very few nebulae, so a nebula category with the magnitude limit the
 set needs finds little.
 
 
+### 0.14.0
+
+Four more well-known object lists join Messier as target sets: Caldwell,
+Herschel 400, Melotte and Collinder. The searches form groups them under
+one "Object list" choice with a dropdown, and each is a set kind of its
+own to the servers. The astro backend keeps every list as a fixed table
+of designation and SIMBAD identifier rather than generating the
+identifiers: SIMBAD has no Caldwell or Herschel 400 numbering at all and
+knows only a third of the Melotte and Collinder numbers, so the entries
+are looked up under their NGC/IC identifiers (or a Trumpler, Melotte or
+Collinder designation where there is none) and named on the sky view by
+the list's own designation, "C 14" or "Cr 399", as the Messier objects
+already were. The Herschel 400 list follows the Astronomical League's
+program list; every entry of every list was checked to resolve, and a
+network-marked test rechecks that.
+
 ## Next steps
 
 - On-hover infobox for the objects

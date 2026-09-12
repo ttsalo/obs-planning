@@ -16,9 +16,21 @@ each with a name, a solar-system flag, and for fixed objects RA and Dec in
 degrees plus, when the catalog provides them, a visual magnitude and an
 object type. The response SHALL include the candidates, their count and
 the unresolved names. `planets` resolves to the eight built-in
-bodies without any catalog access. `messier` resolves to the Messier
-objects M1 to M110 from the SIMBAD catalog, limited to those at or
-brighter than the maximum magnitude when one is given. `category`
+bodies without any catalog access. The object-list kinds — `messier`
+(M1 to M110), `caldwell` (C1 to C109), `herschel400` (the 400 NGC objects
+of the Herschel 400 program), `melotte` (Mel 1 to Mel 245) and
+`collinder` (Cr 1 to Cr 471) — resolve to the objects of that list from
+the SIMBAD catalog, limited to those at or brighter than the maximum
+magnitude when one is given. The service SHALL keep, for every entry of
+every list, the identifier SIMBAD resolves it under (an NGC/IC
+identifier for most, the list's own or another catalogue's designation
+for the rest), since SIMBAD does not carry the Caldwell or Herschel 400
+numbering and carries the Melotte and Collinder designations for only
+some of their entries; each candidate SHALL be named by the list's own
+designation (`C 14`, `Mel 25`, `Cr 399`; a Herschel 400 object by its
+NGC identifier, the list having no numbering of its own) rather than by
+SIMBAD's main identifier, and an entry SIMBAD cannot resolve SHALL be
+left out rather than failing the set. `category`
 resolves to SIMBAD objects of the requested object type, including that
 type's subtypes in SIMBAD's type hierarchy, at or brighter than the given
 maximum magnitude; the service SHALL accept any object type SIMBAD
@@ -52,6 +64,18 @@ readable message.
 - **WHEN** a `messier` set is resolved with maximum magnitude 6
 - **THEN** every candidate is a Messier object with magnitude at most 6 and
   none of the fainter ones appear
+
+#### Scenario: Caldwell object resolved under its NGC identifier
+- **WHEN** a `caldwell` set is resolved
+- **THEN** the Double Cluster is asked of SIMBAD as NGC 869 and returned
+  as a candidate named `C 14` with that object's coordinates, magnitude
+  and type, and the Hyades are asked for as Mel 25 and named `C 41`
+
+#### Scenario: List entry SIMBAD does not know
+- **WHEN** a `melotte` set is resolved and SIMBAD returns no coordinates
+  for one entry's identifier
+- **THEN** that entry is left out and the remaining candidates are
+  returned in the list's order
 
 #### Scenario: A category other than double stars
 - **WHEN** a `category` set of globular clusters with maximum magnitude 9
