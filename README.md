@@ -202,6 +202,23 @@ The `double_stars` set kind is withdrawn with no migration. A search
 saved with it keeps its stored candidates and still lists, selects and
 draws; saving it again requires choosing a set the definition allows.
 
+### 0.13.1
+
+Distinct icons for object categories. Every category the searches
+dialog offers has an icon of its own on the sky view, in the same
+simplified line-graphics style as the planets -- a black outline with a
+colored infill. The six picker groups each have a base shape (a
+four-point star, a pair of discs, a star inside a fatter star outline,
+a circle of dots, a cloud blob and a tilted ellipse) and every category
+is a variation of its group's base by size, infill, a small added
+marker or, where nothing graphical is natural, one to three letters on
+a tag. Colors follow convention where one exists: blue for hot, red for
+cool, pink for ionised hydrogen. Objects whose catalog type is not one
+of the offered categories draw with their group's base shape, and
+unknown types as a plain dot, so the Messier and name-list sets get the
+icons too. Opening the app with `#icons` in the URL shows the whole
+vocabulary with codes and labels instead of the sky.
+
 
 ## Next steps
 
