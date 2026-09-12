@@ -38,12 +38,26 @@ const MAX_PATHS_ALWAYS = 10;
 // Catalog objects have no artistic marker of their own; they get a
 // shape by kind: a four-point star for stars, a hollow circle for
 // extended objects (galaxies, clusters, nebulae), a dot for the rest.
+/* The three tests are ordered, not independent: several labels the
+   object-category picker can produce match more than one of them.
+   "Radio galaxy" holds "radio" but is extended, "Star cluster",
+   "Starburst galaxy" and "Star-forming region" hold "star", and
+   "Supernova remnant" holds "nova" - so the extended test runs before
+   the stellar one, and both after the point-like one. */
+const pointLike = /quasar|bl lac|black hole|radio source|x-ray source/;
+const extendedLike =
+      /cluster|galax|nebula|region|cloud|remnant|group|interstellar|medium/;
+// "star", "binary", "variable", "giant" and "dwarf" already catch most
+// of the stellar vocabulary; the rest are labels with no such word.
+const starLike = /star|stellar|binary|variable|giant|dwarf|cepheid|mira/;
+const alsoStarLike = /asterism|nova|pulsar/;
+
 function markerKind(objectType) {
     const t = (objectType || "").toLowerCase();
     if (t == "") return "dot";
-    if (/star|binary|variable|giant|dwarf|cepheid|mira|asterism/.test(t)) {
-	return "star";
-    }
+    if (pointLike.test(t)) return "dot";
+    if (extendedLike.test(t)) return "extended";
+    if (starLike.test(t) || alsoStarLike.test(t)) return "star";
     return "extended";
 }
 

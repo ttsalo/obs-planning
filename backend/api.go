@@ -338,6 +338,7 @@ type SearchInput struct {
     Name string `json:"name"`
     SetKind string `json:"set_kind"`
     MaxMagnitude *float64 `json:"max_magnitude"`
+    OType string `json:"otype"`
     Names Names `json:"names"`
     StartTime string `json:"start_time"`
     EndTime string `json:"end_time"`
@@ -353,16 +354,21 @@ type SearchInput struct {
 // The definition columns an update writes, after the name. Explicit so
 // zero values and nulls (a cleared magnitude, an emptied day range) are
 // written too.
-var searchInputColumns = []any{"set_kind", "max_magnitude", "names",
+var searchInputColumns = []any{"set_kind", "max_magnitude", "otype", "names",
     "start_time", "end_time", "start_date", "end_date", "visibility",
     "max_brightness", "evaluated_at", "evaluated_position"}
 
 // Copy the editable fields onto a search row, trimming the name and
-// the name list, and dropping the list for sets that don't use one.
+// the name list, and dropping the list and the object-type code for
+// sets that don't use one.
 func (in *SearchInput) applyTo(s *TargetSearch) {
     s.Name = strings.TrimSpace(in.Name)
     s.SetKind = in.SetKind
     s.MaxMagnitude = in.MaxMagnitude
+    s.OType = ""
+    if in.SetKind == "category" {
+	s.OType = strings.TrimSpace(in.OType)
+    }
     s.Names = Names{}
     if in.SetKind == "names" {
 	for _, n := range in.Names {

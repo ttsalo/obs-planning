@@ -35,6 +35,14 @@ MESSIER_IDS = [f"M {n}" for n in range(1, 111)]
 # the database are sized for.
 CANDIDATE_CAP = 2000
 
+# What an object-type code may be made of. Every SIMBAD otype fits
+# ('**', 'V*', 'GlC', 'Sy1', 's*r', 'Cl*', and the '?' candidate
+# suffix); quotes, whitespace, parentheses and comment markers do not.
+# The code goes into an ADQL string literal, so this pattern - not
+# escaping - is what keeps the query safe: astroquery's query_tap takes
+# a finished query string and offers no bind parameters.
+OTYPE_PATTERN = re.compile(r"^[A-Za-z0-9*?_+-]{1,8}$")
+
 SIMBAD_TIMEOUT = 30  # seconds; inside gunicorn's 60 s request budget
 
 
@@ -48,28 +56,54 @@ class TooManyCandidates(Exception):
 
 # SIMBAD object-type codes to readable labels. Anything not listed falls
 # back to a star/galaxy guess from the code's shape, then to the code.
+# Every code the frontend's category picker offers
+# (obs-ui/src/categories.js) MUST be listed here with the same wording,
+# so the category a user picked and the type a candidate comes back with
+# read the same. A code missing from the picker is fine - a candidate can
+# be of a subtype nobody would search for by itself.
 _OTYPE_LABELS = {
-    "**": "Double star", "*": "Star", "V*": "Variable star",
-    "PM*": "High proper-motion star", "RG*": "Red giant",
-    "WD*": "White dwarf", "BD*": "Brown dwarf", "Ce*": "Cepheid",
-    "Mi*": "Mira variable", "Pu*": "Pulsating variable",
+    # Stars
+    "*": "Star", "MS*": "Main sequence star", "RG*": "Red giant",
+    "s*b": "Blue supergiant", "s*r": "Red supergiant",
+    "s*y": "Yellow supergiant", "WD*": "White dwarf",
+    "BD*": "Brown dwarf", "HS*": "Hot subdwarf", "C*": "Carbon star",
+    "S*": "S star", "Em*": "Emission-line star", "Be*": "Be star",
+    "WR*": "Wolf-Rayet star", "HB*": "Horizontal branch star",
+    "AB*": "Asymptotic giant branch star", "TT*": "T Tauri star",
+    "pr*": "Pre-main sequence star", "YSO": "Young stellar object",
+    "PM*": "High proper-motion star", "N*": "Neutron star",
+    "Psr": "Pulsar", "BH": "Black hole",
+    # Double and multiple stars
+    "**": "Double star", "EB*": "Eclipsing binary",
+    "SB*": "Spectroscopic binary", "CV*": "Cataclysmic variable star",
+    "No*": "Nova", "XB*": "X-ray binary", "SyS": "Symbiotic star",
+    # Not offered as categories, but objects of these types come back
+    # inside broader ones (a globular cluster search finds LXB hosts).
+    "LXB": "Low-mass X-ray binary", "HXB": "High-mass X-ray binary",
+    # Variable stars
+    "V*": "Variable star", "Pu*": "Pulsating variable",
+    "Ce*": "Cepheid", "RR*": "RR Lyrae variable", "Mi*": "Mira variable",
+    "LP*": "Long-period variable", "dS*": "Delta Scuti variable",
+    "bC*": "Beta Cephei variable", "RV*": "RV Tauri variable",
     "Ro*": "Rotating variable", "Er*": "Eruptive variable",
-    "EB*": "Eclipsing binary", "SB*": "Spectroscopic binary",
-    "bC*": "Beta Cephei variable", "dS*": "Delta Scuti variable",
-    "LP*": "Long-period variable", "s*b": "Blue supergiant",
-    "s*r": "Red supergiant", "s*y": "Yellow supergiant",
-    "G": "Galaxy", "AGN": "Active galaxy", "Sy1": "Seyfert 1 galaxy",
+    "Fl*": "Flare star",
+    # Clusters
+    "Cl*": "Star cluster", "GlC": "Globular cluster",
+    "OpC": "Open cluster", "As*": "Asterism", "MGr": "Moving group",
+    # Nebulae and interstellar matter
+    "PN": "Planetary nebula", "SNR": "Supernova remnant", "HII": "HII region",
+    "RNe": "Reflection nebula", "DNe": "Dark nebula", "EmO": "Emission object",
+    "Neb": "Nebula", "ISM": "Interstellar medium", "MoC": "Molecular cloud",
+    "SFR": "Star-forming region", "reg": "Region",
+    # Galaxies and beyond
+    "G": "Galaxy", "AGN": "Active galaxy", "QSO": "Quasar",
+    "BLL": "BL Lac object", "rG": "Radio galaxy",
+    "Sy1": "Seyfert 1 galaxy",
     "Sy2": "Seyfert 2 galaxy", "SyG": "Seyfert galaxy", "SBG": "Starburst galaxy",
     "LIN": "LINER galaxy", "EmG": "Emission-line galaxy", "IG": "Interacting galaxies",
     "GiP": "Galaxy in pair", "GiG": "Galaxy in group", "GiC": "Galaxy in cluster",
     "PaG": "Pair of galaxies", "GrG": "Group of galaxies", "ClG": "Cluster of galaxies",
     "LSB": "Low surface brightness galaxy", "H2G": "HII galaxy",
-    "GlC": "Globular cluster", "OpC": "Open cluster", "Cl*": "Star cluster",
-    "As*": "Asterism", "MGr": "Moving group",
-    "PN": "Planetary nebula", "SNR": "Supernova remnant", "HII": "HII region",
-    "RNe": "Reflection nebula", "DNe": "Dark nebula", "EmO": "Emission object",
-    "Neb": "Nebula", "ISM": "Interstellar medium", "MoC": "Molecular cloud",
-    "SFR": "Star-forming region", "reg": "Region",
 }
 
 
@@ -162,28 +196,34 @@ def _resolve_messier(max_magnitude):
 
 
 @lru_cache(maxsize=16)
-def _resolve_double_stars(max_magnitude):
-    # The otypes table carries the type hierarchy, so '**' there matches
-    # every kind of double or multiple star, not just objects whose main
-    # type is the generic '**'. TOP cap+1 lets the cap be detected without
-    # paging.
+def _resolve_category(otype, max_magnitude):
+    # The otypes table carries the type hierarchy, so a code there matches
+    # every subtype of it too, not just objects whose main type is that
+    # exact code. TOP cap+1 lets the cap be detected without paging.
     # SIMBAD's ADQL parser rejects a qualified name in ORDER BY, so the
     # magnitude column is aliased and ordered by its alias.
+    # The code is interpolated into a string literal, so re-check its
+    # shape here: the module stays safe whatever its caller did.
+    if not OTYPE_PATTERN.match(otype or ""):
+        raise ValueError(f"malformed object type {otype!r}")
     adql = (
         f"SELECT TOP {CANDIDATE_CAP + 1} basic.main_id, basic.ra, basic.dec, "
         "allfluxes.V AS V, basic.otype "
         "FROM basic JOIN allfluxes ON basic.oid = allfluxes.oidref "
         "JOIN otypes ON basic.oid = otypes.oidref "
-        f"WHERE otypes.otype = '**' AND allfluxes.V <= {float(max_magnitude)} "
+        f"WHERE otypes.otype = '{otype}' "
+        f"AND allfluxes.V <= {float(max_magnitude)} "
         "ORDER BY V"
     )
     table = _simbad_query_tap(adql)
     if len(table) > CANDIDATE_CAP:
         raise TooManyCandidates(
-            f"More than {CANDIDATE_CAP} double stars are at or brighter than "
-            f"magnitude {max_magnitude}; lower the magnitude limit")
-    candidates = [_fixed_candidate(display_name(_cell(row, "main_id")), row,
-                                   object_type="Double star")
+            f"More than {CANDIDATE_CAP} objects of type "
+            f"\"{otype_label(otype)}\" are at or brighter than magnitude "
+            f"{max_magnitude}; lower the magnitude limit")
+    # No object_type override: each candidate is typed by its own
+    # catalogued otype, which is often a subtype of the requested one.
+    candidates = [_fixed_candidate(display_name(_cell(row, "main_id")), row)
                   for row in table if _cell(row, "ra") is not None]
     return candidates, []
 
@@ -215,15 +255,15 @@ def _resolve_names(names):
     return candidates, unresolved
 
 
-def resolve_set(kind, max_magnitude=None, names=()):
+def resolve_set(kind, max_magnitude=None, names=(), otype=None):
     """Candidates for a target set: (list of candidate dicts, unresolved
     names). Raises TooManyCandidates or CatalogUnavailable."""
     if kind == "planets":
         candidates, unresolved = _resolve_planets()
     elif kind == "messier":
         candidates, unresolved = _resolve_messier(max_magnitude)
-    elif kind == "double_stars":
-        candidates, unresolved = _resolve_double_stars(float(max_magnitude))
+    elif kind == "category":
+        candidates, unresolved = _resolve_category(otype, float(max_magnitude))
     elif kind == "names":
         cleaned = tuple(dict.fromkeys(n.strip() for n in names if n.strip()))
         candidates, unresolved = _resolve_names(cleaned)
@@ -239,7 +279,7 @@ def resolve_set(kind, max_magnitude=None, names=()):
 
 def clear_cache():
     _resolve_messier.cache_clear()
-    _resolve_double_stars.cache_clear()
+    _resolve_category.cache_clear()
     _resolve_names.cache_clear()
 
 

@@ -39,9 +39,13 @@ def objects_table(rows):
 
 
 def tap_table(rows):
-    """A query_tap-shaped table: (main_id, ra, dec, V, otype)."""
-    return Table(rows=rows, names=["main_id", "ra", "dec", "V", "otype"],
-                 dtype=[str, float, float, float, str])
+    """A query_tap-shaped table: (main_id, ra, dec, V, otype). An empty
+    row list still has to carry the columns, which Table cannot infer."""
+    names = ["main_id", "ra", "dec", "V", "otype"]
+    dtype = [str, float, float, float, str]
+    if not rows:
+        return Table(names=names, dtype=dtype)
+    return Table(rows=rows, names=names, dtype=dtype)
 
 
 MESSIER_ROWS = [
@@ -55,6 +59,11 @@ DOUBLE_ROWS = [
     ("* alf Vir", 201.30, -11.16, 0.97, "bC*"),
     ("* alf Boo", 213.92, 19.18, -0.05, "RG*"),
     ("* zet UMa", 200.98, 54.93, 2.23, "SB*"),
+]
+
+CLUSTER_ROWS = [
+    ("M  13", 250.42, 36.46, 5.8, "GlC"),
+    ("NGC 5139", 201.70, -47.48, 3.9, "GlC"),
 ]
 
 
@@ -130,7 +139,7 @@ def test_resolve_messier_is_cached_per_magnitude(client, monkeypatch):
     assert len(calls) == 2
 
 
-def test_resolve_double_stars(client, monkeypatch):
+def test_resolve_category_double_stars(client, monkeypatch):
     queries = []
 
     def fake(adql):
@@ -138,7 +147,8 @@ def test_resolve_double_stars(client, monkeypatch):
         return tap_table(DOUBLE_ROWS)
     monkeypatch.setattr(catalog, "_simbad_query_tap", fake)
 
-    r = resolve(client, {"kind": "double_stars", "max_magnitude": 2.5})
+    r = resolve(client, {"kind": "category", "otype": "**",
+                         "max_magnitude": 2.5})
     assert r.status_code == 200
     assert len(queries) == 1
     assert "otypes.otype = '**'" in queries[0]
@@ -146,27 +156,107 @@ def test_resolve_double_stars(client, monkeypatch):
     assert f"TOP {catalog.CANDIDATE_CAP + 1}" in queries[0]
     names = [c["name"] for c in r.json["candidates"]]
     assert names == ["alf Vir", "alf Boo", "zet UMa"]
-    for c in r.json["candidates"]:
-        assert c["object_type"] == "Double star"
-        assert not c["ss_obj"]
     assert r.json["candidates"][2]["magnitude"] == pytest.approx(2.23)
+    # Each candidate is typed by its own otype - a subtype of the
+    # requested '**' - not by the category that was asked for.
+    assert [c["object_type"] for c in r.json["candidates"]] == [
+        "Beta Cephei variable", "Red giant", "Spectroscopic binary"]
+    for c in r.json["candidates"]:
+        assert not c["ss_obj"]
 
 
-def test_resolve_double_stars_needs_magnitude(client, monkeypatch):
+def test_resolve_category_other_than_double_stars(client, monkeypatch):
+    queries = []
+
+    def fake(adql):
+        queries.append(adql)
+        return tap_table(CLUSTER_ROWS)
+    monkeypatch.setattr(catalog, "_simbad_query_tap", fake)
+
+    r = resolve(client, {"kind": "category", "otype": "GlC",
+                         "max_magnitude": 9})
+    assert r.status_code == 200
+    assert "otypes.otype = 'GlC'" in queries[0]
+    assert [c["name"] for c in r.json["candidates"]] == ["M 13", "NGC 5139"]
+    for c in r.json["candidates"]:
+        assert c["object_type"] == "Globular cluster"
+        assert c["ra"] is not None and c["dec"] is not None
+        assert c["magnitude"] is not None
+
+
+def test_resolve_category_is_cached_per_otype(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(catalog, "_simbad_query_tap",
+                        lambda adql: calls.append(adql) or tap_table([]))
+    resolve(client, {"kind": "category", "otype": "GlC", "max_magnitude": 9})
+    resolve(client, {"kind": "category", "otype": "GlC", "max_magnitude": 9})
+    assert len(calls) == 1
+    resolve(client, {"kind": "category", "otype": "OpC", "max_magnitude": 9})
+    assert len(calls) == 2
+
+
+def test_resolve_category_needs_magnitude(client, monkeypatch):
     seam_raises(monkeypatch)
-    r = resolve(client, {"kind": "double_stars"})
+    r = resolve(client, {"kind": "category", "otype": "**"})
     assert r.status_code == 400
     assert "magnitude" in r.json["message"]
 
 
+def test_resolve_category_needs_otype(client, monkeypatch):
+    seam_raises(monkeypatch)
+    r = resolve(client, {"kind": "category", "max_magnitude": 5})
+    assert r.status_code == 400
+    assert "object type" in r.json["message"]
+
+
+@pytest.mark.parametrize("otype", ["*' OR '1'='1", "Gl C", "(GlC)",
+                                   "GlC;DROP", "TOOLONGCODE", ""])
+def test_resolve_category_malformed_otype(client, monkeypatch, otype):
+    # The schema rejects the shape before catalog.py is reached, so the
+    # raising seam proves no query was attempted.
+    seam_raises(monkeypatch)
+    r = resolve(client, {"kind": "category", "otype": otype,
+                         "max_magnitude": 5})
+    assert r.status_code == 400
+
+
+def test_resolve_category_guards_adql_itself(monkeypatch):
+    # catalog.py re-checks the shape, so it is safe independently of
+    # whoever called it.
+    seam_raises(monkeypatch)
+    with pytest.raises(ValueError):
+        catalog.resolve_set("category", 5, (), "*' OR '1'='1")
+
+
+def test_resolve_category_unknown_otype_is_empty(client, monkeypatch):
+    # Well-formed but not a type SIMBAD defines: the query runs and
+    # matches nothing, which is a successful empty result.
+    monkeypatch.setattr(catalog, "_simbad_query_tap",
+                        lambda adql: tap_table([]))
+    r = resolve(client, {"kind": "category", "otype": "ZZ9",
+                         "max_magnitude": 5})
+    assert r.status_code == 200
+    assert r.json["candidates"] == []
+    assert r.json["count"] == 0
+
+
 def test_resolve_too_many_candidates(client, monkeypatch):
-    rows = [(f"HD {i}", float(i % 360), 10.0, 5.0, "**")
+    rows = [(f"NGC {i}", float(i % 360), 10.0, 5.0, "GlC")
             for i in range(catalog.CANDIDATE_CAP + 1)]
     monkeypatch.setattr(catalog, "_simbad_query_tap", lambda adql: tap_table(rows))
-    r = resolve(client, {"kind": "double_stars", "max_magnitude": 9})
+    r = resolve(client, {"kind": "category", "otype": "GlC",
+                         "max_magnitude": 9})
     assert r.status_code == 400
     assert r.json["error"] == "too_many"
+    # The message names the category, so the user knows which knob to turn.
+    assert "Globular cluster" in r.json["message"]
     assert "lower the magnitude" in r.json["message"]
+
+
+def test_resolve_withdrawn_double_stars_kind(client, monkeypatch):
+    seam_raises(monkeypatch)
+    r = resolve(client, {"kind": "double_stars", "max_magnitude": 5})
+    assert r.status_code == 400
 
 
 def test_resolve_names_mixed(client, monkeypatch):
@@ -222,6 +312,30 @@ def test_otype_labels():
     assert catalog.otype_label("Sy1?") == "Seyfert 1 galaxy (candidate)"
     assert catalog.otype_label("XYZ*") == "Star"
     assert catalog.otype_label("zzz") == "zzz"
+    # Codes the frontend's picker offers whose label the shape-based
+    # fallback would get wrong, or not know at all.
+    assert catalog.otype_label("QSO") == "Quasar"
+    assert catalog.otype_label("rG") == "Radio galaxy"
+    assert catalog.otype_label("BLL") == "BL Lac object"
+    assert catalog.otype_label("Psr") == "Pulsar"
+    assert catalog.otype_label("BH") == "Black hole"
+    assert catalog.otype_label("YSO") == "Young stellar object"
+    assert catalog.otype_label("GlC") == "Globular cluster"
+    # Nothing the picker offers may fall through to the shape-based
+    # guess: those two branches would label 'rG' a galaxy by luck and
+    # 'QSO' not at all.
+    for code in ("*", "MS*", "RG*", "s*b", "s*r", "s*y", "WD*", "BD*",
+                 "HS*", "C*", "S*", "Em*", "Be*", "WR*", "HB*", "AB*",
+                 "TT*", "pr*", "YSO", "PM*", "N*", "Psr", "BH",
+                 "**", "EB*", "SB*", "CV*", "No*", "XB*", "SyS",
+                 "V*", "Pu*", "Ce*", "RR*", "Mi*", "LP*", "dS*", "bC*",
+                 "RV*", "Ro*", "Er*", "Fl*",
+                 "Cl*", "GlC", "OpC", "As*", "MGr",
+                 "PN", "SNR", "HII", "RNe", "DNe", "Neb", "MoC", "SFR",
+                 "G", "AGN", "QSO", "BLL", "rG", "Sy1", "Sy2", "SBG",
+                 "LIN", "EmG", "IG", "PaG", "GrG", "ClG", "LSB"):
+        assert code in catalog._OTYPE_LABELS, f"{code} has no label"
+        assert catalog.OTYPE_PATTERN.match(code), f"{code} is not code-shaped"
     assert catalog.display_name("* alf Vir") == "alf Vir"
     assert catalog.display_name("NAME Sirius") == "Sirius"
     assert catalog.display_name("M  31") == "M 31"

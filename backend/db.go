@@ -7,6 +7,7 @@ import (
     "errors"
     "fmt"
     "os"
+    "regexp"
     "strings"
     "time"
     "github.com/labstack/echo/v4"
@@ -104,10 +105,18 @@ func (n *Names) Scan(value any) error {
 // kinds; the visibility and brightness criteria are what the stored
 // candidates were filtered by.
 var (
-    setKinds = []string{"planets", "messier", "double_stars", "names"}
+    setKinds = []string{"planets", "messier", "category", "names"}
     visibilities = []string{"window", "horizon", "none"}
     brightnesses = []string{"N", "AT", "NT", "CT", "D"}
 )
+
+/* What an object-type code may be made of. The astro backend
+interpolates the code into an ADQL string literal, so this pattern -
+which admits every SIMBAD otype ('**', 'V*', 'GlC', 's*r') and no
+quote, space or comment marker - is what keeps that query safe. The
+check is repeated there; here it stops the column ever holding
+something that isn't code-shaped. */
+var otypePattern = regexp.MustCompile(`^[A-Za-z0-9*?_+-]{1,8}$`)
 
 // The solar-system bodies the "planets" set stands for, in the order
 // the sky view has always listed them.
@@ -139,6 +148,9 @@ type TargetSearch struct {
     User User `json:"-"`
     SetKind string `json:"set_kind"`
     MaxMagnitude *float64 `json:"max_magnitude"`
+    // Named explicitly: GORM would derive "o_type" from the field,
+    // which neither the JSON nor searchInputColumns spells that way.
+    OType string `json:"otype" gorm:"column:otype"`
     Names Names `json:"names" gorm:"type:text"`
     StartTime string `json:"start_time"`
     EndTime string `json:"end_time"`
@@ -180,8 +192,18 @@ func (s *TargetSearch) Validate() error {
     if s.MaxMagnitude != nil && (*s.MaxMagnitude < -30 || *s.MaxMagnitude > 30) {
 	return errors.New("Maximum magnitude must be between -30 and 30")
     }
-    if s.SetKind == "double_stars" && s.MaxMagnitude == nil {
-	return errors.New("Double stars need a maximum magnitude")
+    if s.SetKind == "category" {
+	if s.MaxMagnitude == nil {
+	    return errors.New("A category needs a maximum magnitude")
+	}
+	if s.OType == "" {
+	    return errors.New("A category needs an object type")
+	}
+	if !otypePattern.MatchString(s.OType) {
+	    return fmt.Errorf("Not an object type code: %q", s.OType)
+	}
+    } else if s.OType != "" {
+	return errors.New("Only a category has an object type")
     }
     if s.SetKind == "names" {
 	if len(s.Names) == 0 {
