@@ -137,17 +137,12 @@ function DoubleIcon({primary = "white", secondary = "white",
 /* Variable stars: a four-point star inside a second, thin and fatter
    star outline at 1.5x the size (the throb); the fatter waist keeps a
    visible gap between the two outlines, which a same-shaped outline
-   only slightly larger did not. `spark` adds a small yellow star at the
-   upper right (a flare). */
-function VariableIcon({size = 6, fill = "white", letters = null,
-		       spark = false}) {
+   only slightly larger did not. */
+function VariableIcon({size = 6, fill = "white", letters = null}) {
     return (<>
 		<FourStar size={size * 1.5} innerRatio={0.55} fill={null}
 			  fillEnabled={false} strokeWidth={0.7}></FourStar>
 		<FourStar size={size} fill={fill}></FourStar>
-		{spark &&
-		 <FourStar x={size * 0.7} y={-size * 0.7} size={2.8}
-			   fill="yellow" strokeWidth={0.6}></FourStar>}
 		{letters && <LetterTag text={letters}></LetterTag>}
 	    </>);
 }
@@ -354,8 +349,7 @@ const ICONS = {
     'Be*': {base: 'star', fill: 'deepskyblue', halo: true},
     'WR*': {base: 'star', size: 7, fill: 'mediumpurple', halo: true},
     'TT*': {base: 'star', size: 5, fill: 'orange', disc: true},
-    'pr*': {base: 'star', size: 5, disc: true},
-    'YSO': {base: 'star', size: 5, envelope: true},
+    'Y*O': {base: 'star', size: 5, envelope: true},
     'PM*': {base: 'star', arrow: true},
     'N*':  {base: 'star', size: 4, fill: 'slategray'},
     'Psr': {base: 'star', size: 4, fill: 'slategray', beams: true},
@@ -370,7 +364,7 @@ const ICONS = {
     'No*': {base: 'double', burst: true},
     'XB*': {base: 'double', primary: 'deepskyblue', secondary: 'black',
 	    ring: true},
-    'SyS': {base: 'double', primary: 'red', primaryR: 4},
+    'Sy*': {base: 'double', primary: 'red', primaryR: 4},
 
     // Variable stars
     'V*':  {base: 'variable'},
@@ -384,7 +378,6 @@ const ICONS = {
     'RV*': {base: 'variable', size: 7, fill: 'gold', letters: 'RV'},
     'Ro*': {base: 'variable', letters: 'Ro'},
     'Er*': {base: 'variable', fill: 'orange'},
-    'Fl*': {base: 'variable', fill: 'tomato', spark: true},
 
     // Clusters
     'Cl*': {base: 'cluster'},
@@ -395,7 +388,7 @@ const ICONS = {
     'MGr': {base: 'cluster', arrow: true},
 
     // Nebulae and interstellar matter
-    'Neb': {base: 'nebula'},
+    'ISM': {base: 'nebula'},
     'PN':  {base: 'nebula', round: true, fill: 'mediumturquoise', star: true},
     'SNR': {base: 'nebula', spiky: true, fill: 'coral'},
     'HII': {base: 'nebula', fill: 'hotpink', dots: 1},

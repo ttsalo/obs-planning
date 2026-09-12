@@ -1,7 +1,7 @@
 """Resolving a target set to candidate objects.
 
 The only module that talks to SIMBAD. Everything network-related goes
-through the two ``_simbad_*`` seams at the bottom so tests can replace
+through the ``_simbad_*`` seams at the bottom so tests can replace
 them with canned astropy tables; ``astroquery`` is imported lazily inside
 them so the gunicorn ``--preload`` cold start and per-worker RSS are
 unchanged until the first search.
@@ -70,15 +70,15 @@ _OTYPE_LABELS = {
     "S*": "S star", "Em*": "Emission-line star", "Be*": "Be star",
     "WR*": "Wolf-Rayet star", "HB*": "Horizontal branch star",
     "AB*": "Asymptotic giant branch star", "TT*": "T Tauri star",
-    "pr*": "Pre-main sequence star", "YSO": "Young stellar object",
+    "Y*O": "Young stellar object",
     "PM*": "High proper-motion star", "N*": "Neutron star",
     "Psr": "Pulsar", "BH": "Black hole",
     # Double and multiple stars
     "**": "Double star", "EB*": "Eclipsing binary",
     "SB*": "Spectroscopic binary", "CV*": "Cataclysmic variable star",
-    "No*": "Nova", "XB*": "X-ray binary", "SyS": "Symbiotic star",
+    "No*": "Nova", "XB*": "X-ray binary", "Sy*": "Symbiotic star",
     # Not offered as categories, but objects of these types come back
-    # inside broader ones (a globular cluster search finds LXB hosts).
+    # inside broader ones (an X-ray binary search finds them).
     "LXB": "Low-mass X-ray binary", "HXB": "High-mass X-ray binary",
     # Variable stars
     "V*": "Variable star", "Pu*": "Pulsating variable",
@@ -86,15 +86,17 @@ _OTYPE_LABELS = {
     "LP*": "Long-period variable", "dS*": "Delta Scuti variable",
     "bC*": "Beta Cephei variable", "RV*": "RV Tauri variable",
     "Ro*": "Rotating variable", "Er*": "Eruptive variable",
-    "Fl*": "Flare star",
     # Clusters
     "Cl*": "Star cluster", "GlC": "Globular cluster",
     "OpC": "Open cluster", "As*": "Asterism", "MGr": "Moving group",
-    # Nebulae and interstellar matter
+    # Nebulae and interstellar matter. "ISM" is the root of SIMBAD's
+    # interstellar branch and the picker's broad nebula entry: the
+    # generic "GNe" is a leaf that the bright named nebulae (HII regions
+    # like M 42) do not carry.
+    "ISM": "Nebula or interstellar matter", "GNe": "Nebula",
     "PN": "Planetary nebula", "SNR": "Supernova remnant", "HII": "HII region",
     "RNe": "Reflection nebula", "DNe": "Dark nebula", "EmO": "Emission object",
-    "Neb": "Nebula", "ISM": "Interstellar medium", "MoC": "Molecular cloud",
-    "SFR": "Star-forming region", "reg": "Region",
+    "MoC": "Molecular cloud", "SFR": "Star-forming region", "reg": "Region",
     # Galaxies and beyond
     "G": "Galaxy", "AGN": "Active galaxy", "QSO": "Quasar",
     "BLL": "BL Lac object", "rG": "Radio galaxy",
@@ -104,15 +106,32 @@ _OTYPE_LABELS = {
     "GiP": "Galaxy in pair", "GiG": "Galaxy in group", "GiC": "Galaxy in cluster",
     "PaG": "Pair of galaxies", "GrG": "Group of galaxies", "ClG": "Cluster of galaxies",
     "LSB": "Low surface brightness galaxy", "H2G": "HII galaxy",
+    "BiC": "Brightest cluster galaxy",
 }
+
+# Codes SIMBAD has retired since the picker first offered them, mapped to
+# what it offers now, so a search saved with one still resolves. SIMBAD
+# itself rejects some of these ("Unknown object type") and silently
+# rewrites others ('Neb' to 'ISM', 'YSO' to 'Y*O'); the map keeps the
+# outcome explicit. The frontend carries the same map (categories.js).
+_OTYPE_ALIASES = {"Neb": "ISM", "YSO": "Y*O", "pr*": "Y*O", "SyS": "Sy*",
+                  "Fl*": "Er*"}
 
 
 def otype_label(code):
-    """Readable label for a SIMBAD object-type code."""
+    """Readable label for a SIMBAD object-type code. A candidate code
+    ('Gl?', 's?b', 'Sy1?') is labelled as the type it is a candidate of
+    when the hierarchy says which one that is; it is consulted only once
+    fetched, so a label never starts a catalog request."""
     if code is None:
         return ""
     code = str(code).strip()
+    candidate = "?" in code
     base = code.rstrip("?")
+    if candidate:
+        steps = _known_otype_paths().get(code)
+        if steps and len(steps) > 1:
+            base = steps[-2]
     if base in _OTYPE_LABELS:
         label = _OTYPE_LABELS[base]
     elif base.endswith("*"):
@@ -121,7 +140,7 @@ def otype_label(code):
         label = "Galaxy"
     else:
         label = base
-    return label + (" (candidate)" if code.endswith("?") else "")
+    return label + (" (candidate)" if candidate else "")
 
 
 def display_name(main_id):
@@ -195,23 +214,82 @@ def _resolve_messier(max_magnitude):
     return candidates, []
 
 
+@lru_cache(maxsize=1)
+def _otype_paths():
+    """SIMBAD's object-type hierarchy: {code: [root, ..., code]} for
+    every type it defines, from the ``otypedef`` table (a few hundred
+    rows, fetched once per process). A candidate type's path names the
+    type it is a candidate of ('SR?' has 'ISM > SNR'), so the code
+    itself is appended when it is not already the last element."""
+    table = _simbad_query_otypedef()
+    paths = {}
+    for row in table:
+        code = _cell(row, "otype")
+        path = _cell(row, "path")
+        if code is None or path is None:
+            continue
+        code = str(code).strip()
+        steps = [step.strip() for step in str(path).split(">")]
+        if steps[-1] != code:
+            steps.append(code)
+        paths[code] = steps
+    return paths
+
+
+def _known_otype_paths():
+    """The hierarchy if some earlier call has fetched it, else empty."""
+    return _otype_paths() if _otype_paths.cache_info().currsize else {}
+
+
+def _adql_list(codes):
+    """An ADQL IN-list of object-type codes. The codes come from SIMBAD's
+    own table, but they are interpolated into the query, so each is held
+    to the same shape as a user-supplied one."""
+    for code in codes:
+        if not OTYPE_PATTERN.match(code):
+            raise CatalogUnavailable(
+                f"The SIMBAD catalog defines a malformed object type {code!r}")
+    return "(" + ", ".join(f"'{code}'" for code in codes) + ")"
+
+
 @lru_cache(maxsize=16)
 def _resolve_category(otype, max_magnitude):
-    # The otypes table carries the type hierarchy, so a code there matches
-    # every subtype of it too, not just objects whose main type is that
-    # exact code. TOP cap+1 lets the cap be detected without paging.
-    # SIMBAD's ADQL parser rejects a qualified name in ORDER BY, so the
-    # magnitude column is aliased and ordered by its alias.
-    # The code is interpolated into a string literal, so re-check its
-    # shape here: the module stays safe whatever its caller did.
+    # The code is interpolated into the query, so re-check its shape
+    # here: the module stays safe whatever its caller did.
     if not OTYPE_PATTERN.match(otype or ""):
         raise ValueError(f"malformed object type {otype!r}")
+    otype = _OTYPE_ALIASES.get(otype, otype)
+    # SIMBAD's `otypes` table is a flat list of every type ever attached
+    # to an object (from its identifiers and from papers), and comparing
+    # its otype column is an exact match, NOT a walk of the hierarchy: a
+    # subtype search has to name every code in the subtree itself. Nor
+    # does an attached type make an object one: a star that lights a
+    # nebula carries 'RNe', and a globular cluster's X-ray binary 'GlC'.
+    # So a candidate's own type must also fall in the requested type's
+    # top-level branch (star, cluster, interstellar, galaxy, ...) - the
+    # branch rather than the subtree, because for stars a secondary type
+    # is legitimate (Rigel is a double star under 's*b'). Both lists are
+    # expanded here from the cached hierarchy: joining `otypedef` in the
+    # query with LIKE on its path made SIMBAD scan the whole `otypes`
+    # table, some 40 s per query whatever the result size.
+    # DISTINCT because several attached types can match one object;
+    # TOP cap+1 lets the cap be detected without paging; the magnitude
+    # column is aliased because SIMBAD's ADQL parser rejects a qualified
+    # name in ORDER BY.
+    paths = _otype_paths()
+    if otype not in paths:
+        log.warning("simbad-unknown-otype otype=%s", otype)
+        return [], []
+    root = paths[otype][0]
+    subtree = sorted(c for c, p in paths.items() if otype in p)
+    branch = sorted(c for c, p in paths.items() if p[0] == root)
     adql = (
-        f"SELECT TOP {CANDIDATE_CAP + 1} basic.main_id, basic.ra, basic.dec, "
-        "allfluxes.V AS V, basic.otype "
-        "FROM basic JOIN allfluxes ON basic.oid = allfluxes.oidref "
-        "JOIN otypes ON basic.oid = otypes.oidref "
-        f"WHERE otypes.otype = '{otype}' "
+        f"SELECT DISTINCT TOP {CANDIDATE_CAP + 1} basic.main_id, basic.ra, "
+        "basic.dec, allfluxes.V AS V, basic.otype "
+        "FROM basic JOIN otypes ON otypes.oidref = basic.oid "
+        "JOIN allfluxes ON allfluxes.oidref = basic.oid "
+        f"WHERE otypes.otype IN {_adql_list(subtree)} "
+        f"AND basic.otype IN {_adql_list(branch)} "
         f"AND allfluxes.V <= {float(max_magnitude)} "
         "ORDER BY V"
     )
@@ -278,6 +356,7 @@ def resolve_set(kind, max_magnitude=None, names=(), otype=None):
 
 
 def clear_cache():
+    _otype_paths.cache_clear()
     _resolve_messier.cache_clear()
     _resolve_category.cache_clear()
     _resolve_names.cache_clear()
@@ -319,3 +398,11 @@ def _simbad_query_objects(names):
 
 def _simbad_query_tap(adql):
     return _guard(lambda: _simbad().query_tap(adql), "query_tap")
+
+
+def _simbad_query_otypedef():
+    """Every object type SIMBAD defines with its place in the hierarchy:
+    rows of (otype, path), the path being ' > '-separated codes from the
+    root down."""
+    return _guard(lambda: _simbad().query_tap(
+        "SELECT otype, path FROM otypedef"), "query_tap otypedef")

@@ -357,8 +357,10 @@ def resolve_targets():
       Turn a target set (the planets, the Messier objects, one object
       category at or brighter than a magnitude, or a list of names) into
       candidate objects with coordinates, magnitude and type. A category
-      is a SIMBAD object-type code and matches that type's subtypes too;
-      each candidate is typed by its own catalogued type. Applies no
+      is a SIMBAD object-type code and matches that type's subtypes too,
+      for objects whose own type is in the same top-level branch of the
+      hierarchy; each candidate is typed by its own catalogued type. A
+      code SIMBAD has retired resolves as its successor. Applies no
       observing criteria; see /api/filter-targets for those. Needs SIMBAD
       for everything but the planets.
     parameters:

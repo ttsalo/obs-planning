@@ -7,8 +7,8 @@ import { Alert, Button, Col, ConfigProvider, DatePicker, Flex, Form, Input,
 	 Table, Tag, TimePicker, Typography } from 'antd';
 import { updateSession } from './session.jsx'
 import { useAstroBase } from './config.jsx'
-import { categoryOptions, categoryLabel, DEFAULT_CATEGORY }
-    from './categories.js'
+import { categoryOptions, categoryLabel, categoryGroup, currentCode,
+	 DEFAULT_CATEGORY } from './categories.js'
 
 /* The user's saved searches. Shared by the dialog, the header and the
    sky view through one ["searches"] cache entry, so invalidating it
@@ -121,7 +121,7 @@ function toFormValues(search) {
 	name: search.name,
 	set_kind: search.set_kind,
 	max_magnitude: search.max_magnitude,
-	otype: search.otype || DEFAULT_CATEGORY,
+	otype: currentCode(search.otype) || DEFAULT_CATEGORY,
 	names: (search.names || []).join("\n"),
 	start_time: dayjs(search.start_time, 'HH:mm'),
 	end_time: dayjs(search.end_time, 'HH:mm'),
@@ -230,6 +230,7 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
     const [form] = Form.useForm();
     // Controls which fields the form shows.
     const setKind = Form.useWatch('set_kind', form);
+    const otype = Form.useWatch('otype', form);
 
     const queryClient = useQueryClient();
     const astroBase = useAstroBase();
@@ -493,10 +494,18 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 			   placeholder="Search the categories"
 			   style={{width: 320}}></Select>
 	       </Form.Item>}
+	      {/* SIMBAD carries a visual magnitude for hardly any nebula
+		  (M 42 has none), so a nebula category with the limit the
+		  set needs finds little; say so up front. */}
 	      {(setKind == 'messier' || setKind == 'category') &&
 	       <Form.Item label="Maximum magnitude" name="max_magnitude"
 			  rules={[{required: setKind == 'category',
-				   message: 'A category needs a magnitude limit'}]}>
+				   message: 'A category needs a magnitude limit'}]}
+			  extra={setKind == 'category' && categoryGroup(otype)
+			      == 'Nebulae and interstellar matter'
+			      ? 'SIMBAD lists a visual magnitude for very few '
+			      + 'nebulae, so expect few or no candidates.'
+			      : null}>
 		   <InputNumber min={-30} max={30} step={0.5}
 				style={{width: 160}}></InputNumber>
 	       </Form.Item>}
