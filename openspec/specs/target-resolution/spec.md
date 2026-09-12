@@ -29,7 +29,13 @@ magnitude, or with an object type containing anything but the characters
 a SIMBAD object-type code is made of MUST be rejected as invalid input.
 Each candidate of a `category` set SHALL be typed by its own catalogued
 object type, which may be a subtype of the requested one, rather than by
-the requested type. `names` resolves each name case-insensitively against
+the requested type; a candidate's own type MUST lie in the same top-level
+branch of the hierarchy as the requested type (a star that carries a
+nebula type for the nebula it lights is not a nebula), while a type of
+the requested kind attached to an object from any source counts within
+that branch (a star catalogued as a double under its spectral type is a
+double star). An object-type code SIMBAD has retired SHALL resolve as the
+type that replaced it. `names` resolves each name case-insensitively against
 the built-in bodies (Sun included) first and against SIMBAD otherwise;
 names SIMBAD does not know are returned in an `unresolved` list rather
 than failing the request. A set that yields more than 2000 candidates MUST

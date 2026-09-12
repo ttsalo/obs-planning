@@ -219,6 +219,26 @@ unknown types as a plain dot, so the Messier and name-list sets get the
 icons too. Opening the app with `#icons` in the URL shows the whole
 vocabulary with codes and labels instead of the sky.
 
+### 0.13.2
+
+Category searches match SIMBAD's real type hierarchy. A nebula search
+returned bright stars: the picker's "Nebula" code had been retired by
+SIMBAD, which quietly read it as the whole interstellar branch, and the
+query matched any type ever attached to an object -- Rigel carries a
+reflection-nebula tag for the Witch Head nebula it lights -- rather than
+walking the hierarchy, which SIMBAD's `otypes` table does not do. The
+astro backend now fetches SIMBAD's type definitions once, spells out
+the requested type's subtypes itself, and also requires a candidate's
+own type to sit in the same top-level branch (star, cluster,
+interstellar matter, galaxy), so stars stay out of nebula and galaxy
+searches while Rigel still counts as a double star. The broad nebula
+entry is now the interstellar branch as a whole, five retired codes are
+replaced by their successors (searches saved with the old ones still
+work), candidate types such as "Globular cluster (candidate)" are
+labelled properly, and the form warns that SIMBAD lists a magnitude
+for very few nebulae, so a nebula category with the magnitude limit the
+set needs finds little.
+
 
 ## Next steps
 

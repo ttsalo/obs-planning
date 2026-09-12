@@ -15,8 +15,38 @@ def client():
     return server.app.test_client()
 
 
+# A slice of SIMBAD's otypedef table: (otype, path). Enough of the
+# hierarchy for the codes the tests use; note that a candidate type's
+# path names the type it is a candidate of, not itself.
+OTYPEDEF_ROWS = [
+    ("*", "*"), ("MS*", "* > MS*"), ("Ev*", "* > Ev*"),
+    ("RG*", "* > Ev* > RG*"), ("PN", "* > Ev* > PN"),
+    ("Ma*", "* > Ma*"), ("bC*", "* > Ma* > bC*"), ("sg*", "* > Ma* > sg*"),
+    ("s*b", "* > Ma* > sg* > s*b"),
+    ("**", "* > **"), ("**?", "* > **"), ("EB*", "* > ** > EB*"),
+    ("SB*", "* > ** > SB*"), ("SB?", "* > ** > SB*"),
+    ("XB*", "* > ** > XB*"), ("LXB", "* > ** > XB* > LXB"),
+    ("Sy*", "* > ** > Sy*"), ("Sy?", "* > ** > Sy*"),
+    ("V*", "* > V*"), ("Er*", "* > V* > Er*"), ("Y*O", "* > Y*O"),
+    ("Cl*", "Cl*"), ("GlC", "Cl* > GlC"), ("Gl?", "Cl* > GlC"),
+    ("OpC", "Cl* > OpC"),
+    ("ISM", "ISM"), ("Cld", "ISM > Cld"), ("GNe", "ISM > Cld > GNe"),
+    ("RNe", "ISM > Cld > GNe > RNe"), ("HII", "ISM > HII"),
+    ("SNR", "ISM > SNR"), ("SR?", "ISM > SNR"),
+    ("G", "G"), ("AGN", "G > AGN"), ("SyG", "G > AGN > SyG"),
+    ("Sy1", "G > AGN > SyG > Sy1"), ("Sy1?", "G > AGN > SyG > Sy1"),
+]
+
+
+def otypedef_table(rows=OTYPEDEF_ROWS):
+    return Table(rows=rows, names=["otype", "path"], dtype=[str, str])
+
+
 @pytest.fixture(autouse=True)
-def fresh_catalog_cache():
+def fresh_catalog_cache(monkeypatch):
+    # The hierarchy is canned for every test; a test that needs the seam
+    # to fail or to be counted replaces it again.
+    monkeypatch.setattr(catalog, "_simbad_query_otypedef", otypedef_table)
     catalog.clear_cache()
     yield
     catalog.clear_cache()
@@ -72,6 +102,7 @@ def seam_raises(monkeypatch):
         raise catalog.CatalogUnavailable("The SIMBAD catalog could not be queried (ConnectionError)")
     monkeypatch.setattr(catalog, "_simbad_query_objects", boom)
     monkeypatch.setattr(catalog, "_simbad_query_tap", boom)
+    monkeypatch.setattr(catalog, "_simbad_query_otypedef", boom)
 
 
 def resolve(client, body):
@@ -151,9 +182,19 @@ def test_resolve_category_double_stars(client, monkeypatch):
                          "max_magnitude": 2.5})
     assert r.status_code == 200
     assert len(queries) == 1
-    assert "otypes.otype = '**'" in queries[0]
-    assert "allfluxes.V <= 2.5" in queries[0]
-    assert f"TOP {catalog.CANDIDATE_CAP + 1}" in queries[0]
+    adql = queries[0]
+    # Any attached type in the requested subtree - SIMBAD's otypes
+    # comparison is an exact match, so the subtree is spelled out...
+    assert ("otypes.otype IN ('**', '**?', 'EB*', 'LXB', 'SB*', 'SB?', "
+            "'Sy*', 'Sy?', 'XB*')") in adql
+    # ...and the object's own type in the same top-level branch, which
+    # keeps a star that lights a nebula out of a nebula search but
+    # leaves a double star filed under its spectral type in.
+    assert "basic.otype IN ('*', '**', '**?', " in adql
+    assert "'s*b'" in adql.split("basic.otype IN")[1]
+    assert "'GlC'" not in adql.split("basic.otype IN")[1]
+    assert "allfluxes.V <= 2.5" in adql
+    assert f"SELECT DISTINCT TOP {catalog.CANDIDATE_CAP + 1}" in adql
     names = [c["name"] for c in r.json["candidates"]]
     assert names == ["alf Vir", "alf Boo", "zet UMa"]
     assert r.json["candidates"][2]["magnitude"] == pytest.approx(2.23)
@@ -176,7 +217,8 @@ def test_resolve_category_other_than_double_stars(client, monkeypatch):
     r = resolve(client, {"kind": "category", "otype": "GlC",
                          "max_magnitude": 9})
     assert r.status_code == 200
-    assert "otypes.otype = 'GlC'" in queries[0]
+    assert "otypes.otype IN ('Gl?', 'GlC')" in queries[0]
+    assert "basic.otype IN ('Cl*', 'Gl?', 'GlC', 'OpC')" in queries[0]
     assert [c["name"] for c in r.json["candidates"]] == ["M 13", "NGC 5139"]
     for c in r.json["candidates"]:
         assert c["object_type"] == "Globular cluster"
@@ -229,15 +271,66 @@ def test_resolve_category_guards_adql_itself(monkeypatch):
 
 
 def test_resolve_category_unknown_otype_is_empty(client, monkeypatch):
-    # Well-formed but not a type SIMBAD defines: the query runs and
-    # matches nothing, which is a successful empty result.
-    monkeypatch.setattr(catalog, "_simbad_query_tap",
-                        lambda adql: tap_table([]))
+    # Well-formed but not a type SIMBAD defines: a successful empty
+    # result without a query, since SIMBAD would reject the code.
+    def boom(adql):
+        raise AssertionError("no query expected")
+    monkeypatch.setattr(catalog, "_simbad_query_tap", boom)
     r = resolve(client, {"kind": "category", "otype": "ZZ9",
                          "max_magnitude": 5})
     assert r.status_code == 200
     assert r.json["candidates"] == []
     assert r.json["count"] == 0
+
+
+def test_resolve_category_retired_code_resolves_as_its_successor(client, monkeypatch):
+    # A search saved with a code SIMBAD has since retired ('Neb' for
+    # nebulae) still resolves, under the code that replaced it.
+    queries = []
+
+    def fake(adql):
+        queries.append(adql)
+        return tap_table([("NGC 1976", 83.82, -5.39, 4.0, "HII")])
+    monkeypatch.setattr(catalog, "_simbad_query_tap", fake)
+    r = resolve(client, {"kind": "category", "otype": "Neb",
+                         "max_magnitude": 5})
+    assert r.status_code == 200
+    assert "otypes.otype IN ('Cld', 'GNe', 'HII', 'ISM', 'RNe', 'SNR', 'SR?')" in queries[0]
+    assert r.json["candidates"][0]["object_type"] == "HII region"
+
+
+def test_resolve_category_hierarchy_is_fetched_once(client, monkeypatch):
+    fetches = []
+
+    def fake_otypedef():
+        fetches.append(1)
+        return otypedef_table()
+    monkeypatch.setattr(catalog, "_simbad_query_otypedef", fake_otypedef)
+    monkeypatch.setattr(catalog, "_simbad_query_tap",
+                        lambda adql: tap_table([]))
+    resolve(client, {"kind": "category", "otype": "GlC", "max_magnitude": 9})
+    resolve(client, {"kind": "category", "otype": "OpC", "max_magnitude": 9})
+    resolve(client, {"kind": "category", "otype": "G", "max_magnitude": 12})
+    assert len(fetches) == 1
+
+
+def test_resolve_category_hierarchy_unavailable(client, monkeypatch):
+    seam_raises(monkeypatch)
+    r = resolve(client, {"kind": "category", "otype": "GlC",
+                         "max_magnitude": 9})
+    assert r.status_code == 502
+    assert r.json["error"] == "catalog"
+
+
+def test_resolve_category_candidate_types_are_labelled(client, monkeypatch):
+    # SIMBAD's candidate codes are mostly truncations ('Gl?', 'SB?'),
+    # which only the hierarchy can map back to a type.
+    monkeypatch.setattr(catalog, "_simbad_query_tap", lambda adql: tap_table(
+        [("NGC 1", 1.0, 1.0, 8.0, "Gl?"), ("NGC 2", 2.0, 2.0, 8.5, "GlC")]))
+    r = resolve(client, {"kind": "category", "otype": "GlC",
+                         "max_magnitude": 9})
+    assert [c["object_type"] for c in r.json["candidates"]] == [
+        "Globular cluster (candidate)", "Globular cluster"]
 
 
 def test_resolve_too_many_candidates(client, monkeypatch):
@@ -310,6 +403,12 @@ def test_otype_labels():
     assert catalog.otype_label("**") == "Double star"
     assert catalog.otype_label("G") == "Galaxy"
     assert catalog.otype_label("Sy1?") == "Seyfert 1 galaxy (candidate)"
+    # Before the hierarchy has been fetched a truncated candidate code
+    # gets the shape-based guess; fetching it is never a label's job.
+    assert catalog.otype_label("SB?") == "SB (candidate)"
+    catalog._otype_paths()
+    assert catalog.otype_label("Gl?") == "Globular cluster (candidate)"
+    assert catalog.otype_label("SB?") == "Spectroscopic binary (candidate)"
     assert catalog.otype_label("XYZ*") == "Star"
     assert catalog.otype_label("zzz") == "zzz"
     # Codes the frontend's picker offers whose label the shape-based
@@ -319,23 +418,26 @@ def test_otype_labels():
     assert catalog.otype_label("BLL") == "BL Lac object"
     assert catalog.otype_label("Psr") == "Pulsar"
     assert catalog.otype_label("BH") == "Black hole"
-    assert catalog.otype_label("YSO") == "Young stellar object"
+    assert catalog.otype_label("Y*O") == "Young stellar object"
     assert catalog.otype_label("GlC") == "Globular cluster"
+    assert catalog.otype_label("GNe") == "Nebula"
+    assert catalog.otype_label("ISM") == "Nebula or interstellar matter"
     # Nothing the picker offers may fall through to the shape-based
     # guess: those two branches would label 'rG' a galaxy by luck and
     # 'QSO' not at all.
     for code in ("*", "MS*", "RG*", "s*b", "s*r", "s*y", "WD*", "BD*",
                  "HS*", "C*", "S*", "Em*", "Be*", "WR*", "HB*", "AB*",
-                 "TT*", "pr*", "YSO", "PM*", "N*", "Psr", "BH",
-                 "**", "EB*", "SB*", "CV*", "No*", "XB*", "SyS",
+                 "TT*", "Y*O", "PM*", "N*", "Psr", "BH",
+                 "**", "EB*", "SB*", "CV*", "No*", "XB*", "Sy*",
                  "V*", "Pu*", "Ce*", "RR*", "Mi*", "LP*", "dS*", "bC*",
-                 "RV*", "Ro*", "Er*", "Fl*",
+                 "RV*", "Ro*", "Er*",
                  "Cl*", "GlC", "OpC", "As*", "MGr",
-                 "PN", "SNR", "HII", "RNe", "DNe", "Neb", "MoC", "SFR",
+                 "ISM", "PN", "SNR", "HII", "RNe", "DNe", "MoC", "SFR",
                  "G", "AGN", "QSO", "BLL", "rG", "Sy1", "Sy2", "SBG",
                  "LIN", "EmG", "IG", "PaG", "GrG", "ClG", "LSB"):
         assert code in catalog._OTYPE_LABELS, f"{code} has no label"
         assert catalog.OTYPE_PATTERN.match(code), f"{code} is not code-shaped"
+        assert code not in catalog._OTYPE_ALIASES, f"{code} is retired"
     assert catalog.display_name("* alf Vir") == "alf Vir"
     assert catalog.display_name("NAME Sirius") == "Sirius"
     assert catalog.display_name("M  31") == "M 31"
