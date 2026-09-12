@@ -9,7 +9,11 @@
 
    Every label here MUST match the one catalog.py gives the same code in
    _OTYPE_LABELS, so the category a user picked and the type a candidate
-   comes back with read the same. */
+   comes back with read the same. The sky view also finds a candidate's
+   icon through that label, so a new category needs an entry in the
+   ICONS table of icons.jsx as well (the module reports a code missing
+   there in the console); open the app with "#icons" in the URL to
+   check the icon next to the others. */
 
 export const categories = [
     // Stars

@@ -11,6 +11,7 @@ import { useAstroBase } from './config.jsx'
 import { useSearches } from './searches.jsx'
 import { altToBrightness, brightnessChangeToAlt, checkObsWindow,
 	 findUpcomingTransitions, findNextTransition } from './transitions.jsx'
+import { CategoryIcon, IconSheet, objStrokeWidth } from './icons.jsx'
 
 // Artistic representations of solar system objects
 const objMap = new Map();
@@ -24,10 +25,9 @@ objMap.set("Saturn", {fill: "peachpuff", radius: 5.8});
 objMap.set("Uranus", {fill: "lightskyblue", radius: 5});
 objMap.set("Neptune", {fill: "cornflowerblue", radius: 5});
 
-// Shared outline width for all object markers, so the moon (whose outline
-// is a separate stroke-only circle on top of the phase shapes) matches the
-// plain filled-circle objects exactly.
-const objStrokeWidth = 1.2;
+// The shared marker outline width comes from icons.jsx, so the moon (whose
+// outline is a separate stroke-only circle on top of the phase shapes),
+// the plain filled-circle planets and the catalog icons all match.
 
 // A search with this many matched objects or fewer gets a path for
 // every one of them, as the planets always have; above it only the
@@ -35,48 +35,19 @@ const objStrokeWidth = 1.2;
 // so a Messier-sized search stays readable.
 const MAX_PATHS_ALWAYS = 10;
 
-// Catalog objects have no artistic marker of their own; they get a
-// shape by kind: a four-point star for stars, a hollow circle for
-// extended objects (galaxies, clusters, nebulae), a dot for the rest.
-/* The three tests are ordered, not independent: several labels the
-   object-category picker can produce match more than one of them.
-   "Radio galaxy" holds "radio" but is extended, "Star cluster",
-   "Starburst galaxy" and "Star-forming region" hold "star", and
-   "Supernova remnant" holds "nova" - so the extended test runs before
-   the stellar one, and both after the point-like one. */
-const pointLike = /quasar|bl lac|black hole|radio source|x-ray source/;
-const extendedLike =
-      /cluster|galax|nebula|region|cloud|remnant|group|interstellar|medium/;
-// "star", "binary", "variable", "giant" and "dwarf" already catch most
-// of the stellar vocabulary; the rest are labels with no such word.
-const starLike = /star|stellar|binary|variable|giant|dwarf|cepheid|mira/;
-const alsoStarLike = /asterism|nova|pulsar/;
-
-function markerKind(objectType) {
-    const t = (objectType || "").toLowerCase();
-    if (t == "") return "dot";
-    if (pointLike.test(t)) return "dot";
-    if (extendedLike.test(t)) return "extended";
-    if (starLike.test(t) || alsoStarLike.test(t)) return "star";
-    return "extended";
-}
-
-function FixedMarker({x, y, objectType}) {
-    const kind = markerKind(objectType);
-    if (kind == "star") {
-	return (<Star x={x} y={y} numPoints={4} innerRadius={1.8}
-		      outerRadius={6} fill="white" stroke="black"
-		      strokeWidth={objStrokeWidth}>
-		</Star>);
-    }
-    if (kind == "extended") {
-	return (<Circle x={x} y={y} radius={5} stroke="white"
-			strokeWidth={1.5} fill="rgba(255,255,255,0.25)">
-		</Circle>);
-    }
-    return (<Circle x={x} y={y} radius={3} fill="white" stroke="black"
-		    strokeWidth={objStrokeWidth}>
-	    </Circle>);
+// With "#icons" in the URL the stage shows the catalog icon vocabulary
+// instead of the sky, for checking the icons in one screen. Editing the
+// fragment in an open app does not reload the page, so the hash is
+// followed rather than read once.
+const ICON_SHEET_HASH = "#icons";
+function useIconSheet() {
+    const [on, setOn] = useState(window.location.hash == ICON_SHEET_HASH);
+    useEffect(() => {
+	const follow = () => setOn(window.location.hash == ICON_SHEET_HASH);
+	window.addEventListener("hashchange", follow);
+	return () => window.removeEventListener("hashchange", follow);
+    }, []);
+    return on;
 }
 
 // Draw the representation of a given object. When phase data is present
@@ -327,8 +298,8 @@ function useBatchPositions(targets, pos, stageSize) {
 
 // Markers for the selected search's matched objects, entries being
 // the batch request's results in the targets' order: the artistic
-// ObsObject for solar-system bodies, a marker by catalog type for the
-// rest. Reports hover the same way Target does; a click or tap
+// ObsObject for solar-system bodies, the category icon (icons.jsx) for
+// the rest. Reports hover the same way Target does; a click or tap
 // toggles the object's full path through onToggle.
 function ResultMarkers({targets, entries, onHover, onToggle}) {
     const stageSize = useContext(StageContext);
@@ -369,8 +340,8 @@ function ResultMarkers({targets, entries, onHover, onToggle}) {
 					 ? {k: entry.illumination,
 					    angle: entry.bright_limb_angle}
 					 : null}></ObsObject>
-		     : <FixedMarker x={x} y={y} objectType={obj.object_type}>
-		       </FixedMarker>}
+		     : <CategoryIcon x={x} y={y} objectType={obj.object_type}>
+		       </CategoryIcon>}
 		</Group>);
     });
     return <>{markers}</>;
@@ -822,6 +793,7 @@ const ObsStage = ({setSession}) => {
     // 24 hours, ignoring the observation window, and are drawn even in
     // a search too large for always-on paths.
     const [pinned, setPinned] = useState(() => new Set());
+    const showIconSheet = useIconSheet();
     const togglePinned = (name) => setPinned((prev) => {
 	const next = new Set(prev);
 	if (next.has(name)) { next.delete(name); } else { next.add(name); }
@@ -913,6 +885,9 @@ const ObsStage = ({setSession}) => {
 	setPinned((prev) => prev.size == 0 ? prev : new Set());
     }, [session?.search]);
 
+    if (showIconSheet) {
+	return (<Layer><IconSheet></IconSheet></Layer>);
+    }
     if (session == null) {
 	console.log("session null, skip rendering contents");
 	return null;
