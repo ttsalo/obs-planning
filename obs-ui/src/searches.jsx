@@ -3,10 +3,12 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Col, ConfigProvider, DatePicker, Flex, Form, Input,
-	 InputNumber, List, Modal, Popconfirm, Radio, Row, Space, Table,
-	 Tag, TimePicker, Typography } from 'antd';
+	 InputNumber, List, Modal, Popconfirm, Radio, Row, Select, Space,
+	 Table, Tag, TimePicker, Typography } from 'antd';
 import { updateSession } from './session.jsx'
 import { useAstroBase } from './config.jsx'
+import { categoryOptions, categoryLabel, DEFAULT_CATEGORY }
+    from './categories.js'
 
 /* The user's saved searches. Shared by the dialog, the header and the
    sky view through one ["searches"] cache entry, so invalidating it
@@ -39,7 +41,7 @@ function usePositions(session) {
 const setKindOptions = [
     {value: 'planets', label: 'Planets'},
     {value: 'messier', label: 'Messier objects'},
-    {value: 'double_stars', label: 'Double stars'},
+    {value: 'category', label: 'Object category'},
     {value: 'names', label: 'Names'},
 ];
 const visibilityOptions = [
@@ -58,13 +60,17 @@ const brightnessOptions = [
 const kindLabel = (kind) =>
       setKindOptions.find((o) => o.value == kind)?.label || kind;
 
-// One-line summary of a search's target set for the list.
+/* One-line summary of a search's target set for the list. A search
+   saved under a set kind this version no longer offers (double_stars,
+   withdrawn in 0.13.0) still has to summarise: kindLabel falls back to
+   the stored kind, and categoryLabel to the stored code. */
 export function setSummary(search) {
     if (search.set_kind == 'names') {
 	const n = search.names?.length || 0;
 	return `${n} name${n == 1 ? "" : "s"}`;
     }
-    const label = kindLabel(search.set_kind);
+    const label = search.set_kind == 'category'
+	  ? categoryLabel(search.otype) : kindLabel(search.set_kind);
     return search.max_magnitude != null
 	? `${label} ≤ mag ${search.max_magnitude}` : label;
 }
@@ -90,12 +96,13 @@ function splitNames(text) {
 // Form values -> the search definition the servers understand.
 function toDefinition(values) {
     const kind = values.set_kind;
-    const hasMagnitude = kind == 'messier' || kind == 'double_stars';
+    const hasMagnitude = kind == 'messier' || kind == 'category';
     return {
 	name: values.name,
 	set_kind: kind,
 	max_magnitude: hasMagnitude && values.max_magnitude != null
 	    ? values.max_magnitude : null,
+	otype: kind == 'category' ? (values.otype || "") : "",
 	names: kind == 'names' ? splitNames(values.names) : [],
 	start_time: values.start_time ? values.start_time.format('HH:mm') : "",
 	end_time: values.end_time ? values.end_time.format('HH:mm') : "",
@@ -114,6 +121,7 @@ function toFormValues(search) {
 	name: search.name,
 	set_kind: search.set_kind,
 	max_magnitude: search.max_magnitude,
+	otype: search.otype || DEFAULT_CATEGORY,
 	names: (search.names || []).join("\n"),
 	start_time: dayjs(search.start_time, 'HH:mm'),
 	end_time: dayjs(search.end_time, 'HH:mm'),
@@ -125,7 +133,8 @@ function toFormValues(search) {
 }
 
 const newSearchDefaults = {
-    name: "", set_kind: 'planets', max_magnitude: null, names: "",
+    name: "", set_kind: 'planets', max_magnitude: null,
+    otype: DEFAULT_CATEGORY, names: "",
     start_time: dayjs('22:00', 'HH:mm'), end_time: dayjs('02:00', 'HH:mm'),
     day_range: null, visibility: 'window', max_brightness: 'NT',
 };
@@ -135,7 +144,7 @@ const newSearchDefaults = {
    catalog; changing anything else only re-applies the criteria. */
 function setKey(def) {
     return JSON.stringify({kind: def.set_kind, mag: def.max_magnitude,
-			   names: def.names});
+			   otype: def.otype, names: def.names});
 }
 
 /* The UTC observing windows a definition describes: one per day of the
@@ -335,6 +344,7 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 		const resp = await axios.post(
 		    `${astroBase}/api/resolve-targets`,
 		    {set: {kind: def.set_kind, max_magnitude: def.max_magnitude,
+			   otype: def.otype || undefined,
 			   names: def.names}},
 		    {timeout: 120 * 1000});
 		current = {setKey: setKey(def), list: resp.data.candidates,
@@ -465,13 +475,28 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 			 rules={[{required: true, message: 'Name is required'}]}>
 		  <Input></Input>
 	      </Form.Item>
-	      <Form.Item label="Target set" name="set_kind">
+	      {/* Required, so a search saved under the withdrawn
+		  double_stars kind - whose radio group renders with
+		  nothing selected - cannot be saved without choosing
+		  a set the server still accepts. */}
+	      <Form.Item label="Target set" name="set_kind"
+			 rules={[{required: true,
+				  message: 'Choose a target set'}]}>
 		  <Radio.Group options={setKindOptions}></Radio.Group>
 	      </Form.Item>
-	      {(setKind == 'messier' || setKind == 'double_stars') &&
+	      {setKind == 'category' &&
+	       <Form.Item label="Category" name="otype"
+			  rules={[{required: true,
+				   message: 'Choose an object category'}]}>
+		   <Select options={categoryOptions} showSearch
+			   optionFilterProp="label"
+			   placeholder="Search the categories"
+			   style={{width: 320}}></Select>
+	       </Form.Item>}
+	      {(setKind == 'messier' || setKind == 'category') &&
 	       <Form.Item label="Maximum magnitude" name="max_magnitude"
-			  rules={[{required: setKind == 'double_stars',
-				   message: 'Double stars need a magnitude limit'}]}>
+			  rules={[{required: setKind == 'category',
+				   message: 'A category needs a magnitude limit'}]}>
 		   <InputNumber min={-30} max={30} step={0.5}
 				style={{width: 160}}></InputNumber>
 	       </Form.Item>}

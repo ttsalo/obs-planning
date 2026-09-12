@@ -175,6 +175,34 @@ object; the hover tooltips and the Sun's twilight labels no longer take
 part in hit detection at all, a tooltip being anchored on the very
 marker it describes.
 
+### 0.13.0
+
+Object categories. The "Double stars" target set was one hard-coded
+SIMBAD object type out of the roughly two hundred the catalog knows; it
+is replaced by an "Object category" set that can name any of them. The
+searches dialog offers a grouped, searchable picker -- stars, double and
+multiple stars, variable stars, clusters, nebulae and interstellar
+matter, and galaxies and beyond -- and a search names exactly one
+category, still with the magnitude limit the prototype required. A
+category matches the type's subtypes as well, and each candidate is now
+typed by its own catalogued type rather than by the category that was
+asked for, so a double-star search tells an eclipsing binary from a
+spectroscopic one. The sky view's marker shapes follow the wider
+vocabulary: clusters, nebulae and galaxies are drawn as extended
+objects, quasars and black holes as points.
+
+The curated list of categories lives in the frontend alone
+(`obs-ui/src/categories.js`); the Go server and the astro backend are
+generic over object-type codes and validate only their shape, which is
+also what keeps the code safe to interpolate into the catalog query. A
+well-formed code SIMBAD does not define resolves to no candidates rather
+than to an error.
+
+The `double_stars` set kind is withdrawn with no migration. A search
+saved with it keeps its stored candidates and still lists, selects and
+draws; saving it again requires choosing a set the definition allows.
+
+
 ## Next steps
 
 - On-hover infobox for the objects
@@ -439,4 +467,3 @@ export OBS_DB_PASSWORD=<db-password>
 export OBS_DB_NAME="obs_db"
 export OBS_DB_PORT=5432
 ```
-

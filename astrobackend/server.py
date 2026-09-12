@@ -354,11 +354,13 @@ def resolve_targets():
     Resolve a target set to candidate objects
     ---
     description:
-      Turn a target set (the planets, the Messier objects, double stars
-      at or brighter than a magnitude, or a list of names) into candidate
-      objects with coordinates, magnitude and type. Applies no observing
-      criteria; see /api/filter-targets for those. Needs SIMBAD for
-      everything but the planets.
+      Turn a target set (the planets, the Messier objects, one object
+      category at or brighter than a magnitude, or a list of names) into
+      candidate objects with coordinates, magnitude and type. A category
+      is a SIMBAD object-type code and matches that type's subtypes too;
+      each candidate is typed by its own catalogued type. Applies no
+      observing criteria; see /api/filter-targets for those. Needs SIMBAD
+      for everything but the planets.
     parameters:
       - name: body
         in: body
@@ -384,14 +386,21 @@ def resolve_targets():
     target_set = data["set"]
     kind = target_set["kind"]
     max_magnitude = target_set.get("max_magnitude")
+    otype = (target_set.get("otype") or "").strip()
     names = [n for n in target_set.get("names") or [] if n.strip()]
-    if kind == "double_stars" and max_magnitude is None:
-        return _error(400, "invalid", "Double stars need a maximum magnitude")
+    if kind == "category":
+        # Both checks before any catalog call: the schema has already
+        # rejected a malformed code, so only an absent one gets here.
+        if not otype:
+            return _error(400, "invalid", "A category needs an object type")
+        if max_magnitude is None:
+            return _error(400, "invalid", "A category needs a maximum magnitude")
     if kind == "names" and not names:
         return _error(400, "invalid", "A name list needs at least one name")
 
     try:
-        candidates, unresolved = catalog.resolve_set(kind, max_magnitude, names)
+        candidates, unresolved = catalog.resolve_set(kind, max_magnitude, names,
+                                                     otype)
     except catalog.TooManyCandidates as err:
         return _error(400, "too_many", str(err))
     except catalog.CatalogUnavailable as err:

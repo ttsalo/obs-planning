@@ -18,7 +18,7 @@ func floatPtr(f float64) *float64 { return &f }
 // Valid baseline the TestTargetSearchValidate cases mutate one field of.
 func validSearch() TargetSearch {
     return TargetSearch{Name: "Bright doubles", UserID: 1,
-	SetKind: "double_stars", MaxMagnitude: floatPtr(5),
+	SetKind: "category", OType: "**", MaxMagnitude: floatPtr(5),
 	StartTime: "22:00", EndTime: "02:00",
 	Visibility: "window", MaxBrightness: "NT"}
 }
@@ -31,13 +31,22 @@ func TestTargetSearchValidate(t *testing.T) {
     }{
 	{"valid", func(s *TargetSearch) {}, true},
 	{"planets", func(s *TargetSearch) {
-	    s.SetKind = "planets"; s.MaxMagnitude = nil }, true},
+	    s.SetKind = "planets"; s.MaxMagnitude = nil; s.OType = "" }, true},
 	{"messier without magnitude", func(s *TargetSearch) {
-	    s.SetKind = "messier"; s.MaxMagnitude = nil }, true},
+	    s.SetKind = "messier"; s.MaxMagnitude = nil; s.OType = "" }, true},
 	{"messier with magnitude", func(s *TargetSearch) {
-	    s.SetKind = "messier" }, true},
+	    s.SetKind = "messier"; s.OType = "" }, true},
 	{"names", func(s *TargetSearch) {
-	    s.SetKind = "names"; s.Names = Names{"Vega", "M31"} }, true},
+	    s.SetKind = "names"; s.OType = ""
+	    s.Names = Names{"Vega", "M31"} }, true},
+	{"cluster category", func(s *TargetSearch) {
+	    s.OType = "GlC"; s.MaxMagnitude = floatPtr(9) }, true},
+	{"category code with a digit", func(s *TargetSearch) {
+	    s.OType = "Sy1" }, true},
+	{"category code with a candidate suffix", func(s *TargetSearch) {
+	    s.OType = "GlC?" }, true},
+	{"lowercase category code", func(s *TargetSearch) {
+	    s.OType = "s*r" }, true},
 	{"day range", func(s *TargetSearch) {
 	    s.StartDate = "2026-09-01"; s.EndDate = "2026-10-01" }, true},
 	{"single day range", func(s *TargetSearch) {
@@ -49,14 +58,27 @@ func TestTargetSearchValidate(t *testing.T) {
 	{"empty name", func(s *TargetSearch) { s.Name = "" }, false},
 	{"blank name", func(s *TargetSearch) { s.Name = " \t" }, false},
 	{"unknown set", func(s *TargetSearch) { s.SetKind = "comets" }, false},
-	{"double stars without magnitude", func(s *TargetSearch) {
+	{"withdrawn double stars set", func(s *TargetSearch) {
+	    s.SetKind = "double_stars"; s.OType = "" }, false},
+	{"category without magnitude", func(s *TargetSearch) {
 	    s.MaxMagnitude = nil }, false},
+	{"category without an object type", func(s *TargetSearch) {
+	    s.OType = "" }, false},
+	{"category code with a quote", func(s *TargetSearch) {
+	    s.OType = "*' OR '1'='1" }, false},
+	{"category code with a space", func(s *TargetSearch) {
+	    s.OType = "Gl C" }, false},
+	{"category code too long", func(s *TargetSearch) {
+	    s.OType = "TOOLONGCODE" }, false},
+	{"object type on a non-category set", func(s *TargetSearch) {
+	    s.SetKind = "planets"; s.MaxMagnitude = nil }, false},
 	{"absurd magnitude", func(s *TargetSearch) {
 	    s.MaxMagnitude = floatPtr(99) }, false},
 	{"names without names", func(s *TargetSearch) {
-	    s.SetKind = "names" }, false},
+	    s.SetKind = "names"; s.OType = "" }, false},
 	{"names with a blank name", func(s *TargetSearch) {
-	    s.SetKind = "names"; s.Names = Names{"Vega", "  "} }, false},
+	    s.SetKind = "names"; s.OType = ""
+	    s.Names = Names{"Vega", "  "} }, false},
 	{"bad start time", func(s *TargetSearch) { s.StartTime = "25:00" }, false},
 	{"bad end time", func(s *TargetSearch) { s.EndTime = "2am" }, false},
 	{"start date only", func(s *TargetSearch) {
@@ -217,7 +239,8 @@ const doublesCandidatesJSON = `[` +
     `{"name":"Albireo","ss_obj":false,"ra":292.68,"dec":27.96,` +
     `"magnitude":3.1,"object_type":"Double star","matched":false}]`
 
-const doublesJSON = `{"name":"Bright doubles","set_kind":"double_stars",` +
+const doublesJSON = `{"name":"Bright doubles","set_kind":"category",` +
+    `"otype":"**",` +
     `"max_magnitude":5,"start_time":"22:00","end_time":"02:00",` +
     `"visibility":"window","max_brightness":"NT",` +
     `"evaluated_at":"2026-09-03T20:00:00Z","evaluated_position":"Helsinki",` +
@@ -225,7 +248,7 @@ const doublesJSON = `{"name":"Bright doubles","set_kind":"double_stars",` +
 
 // The same definition with a different name and candidate list.
 func searchJSON(name string, candidates string) string {
-    return `{"name":"` + name + `","set_kind":"double_stars",` +
+    return `{"name":"` + name + `","set_kind":"category","otype":"**",` +
 	`"max_magnitude":5,"start_time":"22:00","end_time":"02:00",` +
 	`"visibility":"window","max_brightness":"NT",` +
 	`"evaluated_position":"Helsinki","candidates":` + candidates + `}`
@@ -247,7 +270,8 @@ func TestCreateSearch(t *testing.T) {
 
     assert.NotEqual(t, uint(0), created.ID)
     assert.Equal(t, "Bright doubles", created.Name)
-    assert.Equal(t, "double_stars", created.SetKind)
+    assert.Equal(t, "category", created.SetKind)
+    assert.Equal(t, "**", created.OType)
     assert.Equal(t, 5.0, *created.MaxMagnitude)
     assert.Equal(t, "22:00", created.StartTime)
     assert.Equal(t, "window", created.Visibility)
@@ -268,6 +292,45 @@ func TestCreateSearch(t *testing.T) {
     assert.Equal(t, "Albireo", stored.TargetObjects[1].Name)
     assert.False(t, stored.TargetObjects[1].Matched)
     assert.Equal(t, 292.68, stored.TargetObjects[1].RA)
+}
+
+// The object-type code round-trips for a category set, and is dropped
+// for every other set rather than rejecting the request.
+func TestCreateSearchCategoryOType(t *testing.T) {
+    created := createSearch(t, `{"name":"Globulars","set_kind":"category",` +
+	`"otype":" GlC ","max_magnitude":9,"start_time":"22:00",` +
+	`"end_time":"02:00","visibility":"window","max_brightness":"NT",` +
+	`"candidates":[]}`)
+    defer dropSearch(created.ID)
+
+    assert.Equal(t, "GlC", created.OType)
+    assert.Equal(t, "GlC", findSearch(t, created.ID).OType)
+
+    // A code sent with a set that has no categories is ignored, not an
+    // error: the sky view and the listing never read it for such a set.
+    other := createSearch(t, `{"name":"Planets with a code",` +
+	`"set_kind":"planets","otype":"GlC","start_time":"22:00",` +
+	`"end_time":"02:00","visibility":"none","max_brightness":"D",` +
+	`"candidates":[]}`)
+    defer dropSearch(other.ID)
+
+    assert.Equal(t, "", other.OType)
+    assert.Equal(t, "", findSearch(t, other.ID).OType)
+}
+
+// Switching a saved category search to another set clears its code.
+func TestUpdateSearchClearsOType(t *testing.T) {
+    created := createSearch(t, doublesJSON)
+    defer dropSearch(created.ID)
+    assert.Equal(t, "**", created.OType)
+
+    rec := searchRequest(t, http.MethodPut,
+	`{"name":"Bright doubles","set_kind":"planets","start_time":"22:00",` +
+	    `"end_time":"02:00","visibility":"none","max_brightness":"D",` +
+	    `"candidates":[]}`,
+	fmt.Sprint(created.ID), h.updateSearch)
+    assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+    assert.Equal(t, "", findSearch(t, created.ID).OType)
 }
 
 // A name list round-trips as an array, trimmed.
@@ -292,7 +355,18 @@ func TestCreateSearchInvalid(t *testing.T) {
     }
     cases := map[string]string{
 	"unknown set": base(`"set_kind":"comets"`, `[]`),
-	"double stars without magnitude": base(`"set_kind":"double_stars"`, `[]`),
+	"withdrawn double stars set": base(
+	    `"set_kind":"double_stars","max_magnitude":5`, `[]`),
+	"category without magnitude": base(
+	    `"set_kind":"category","otype":"**"`, `[]`),
+	"category without an object type": base(
+	    `"set_kind":"category","max_magnitude":5`, `[]`),
+	"category with a quoted object type": base(
+	    `"set_kind":"category","max_magnitude":5,"otype":"*' OR '1'='1"`,
+	    `[]`),
+	"category with an over-long object type": base(
+	    `"set_kind":"category","max_magnitude":5,"otype":"TOOLONGCODE"`,
+	    `[]`),
 	"empty name list": base(`"set_kind":"names","names":[]`, `[]`),
 	"blank names": base(`"set_kind":"names","names":["  "]`, `[]`),
 	"unknown visibility": `{"name":"Bad","set_kind":"planets",` +
