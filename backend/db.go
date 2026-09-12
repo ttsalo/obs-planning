@@ -102,10 +102,14 @@ func (n *Names) Scan(value any) error {
 }
 
 // The vocabulary of a search definition. A target set is one of the
-// kinds; the visibility and brightness criteria are what the stored
-// candidates were filtered by.
+// kinds - messier, caldwell, herschel400, melotte and collinder are the
+// well-known object lists the astro backend keeps (astrobackend/lists.py)
+// and behave alike: an optional magnitude limit, nothing else; the
+// visibility and brightness criteria are what the stored candidates
+// were filtered by.
 var (
-    setKinds = []string{"planets", "messier", "category", "names"}
+    setKinds = []string{"planets", "messier", "caldwell", "herschel400",
+	"melotte", "collinder", "category", "names"}
     visibilities = []string{"window", "horizon", "none"}
     brightnesses = []string{"N", "AT", "NT", "CT", "D"}
 )

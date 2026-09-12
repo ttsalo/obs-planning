@@ -36,6 +36,16 @@ func TestTargetSearchValidate(t *testing.T) {
 	    s.SetKind = "messier"; s.MaxMagnitude = nil; s.OType = "" }, true},
 	{"messier with magnitude", func(s *TargetSearch) {
 	    s.SetKind = "messier"; s.OType = "" }, true},
+	{"caldwell without magnitude", func(s *TargetSearch) {
+	    s.SetKind = "caldwell"; s.MaxMagnitude = nil; s.OType = "" }, true},
+	{"herschel 400 with magnitude", func(s *TargetSearch) {
+	    s.SetKind = "herschel400"; s.OType = "" }, true},
+	{"melotte", func(s *TargetSearch) {
+	    s.SetKind = "melotte"; s.MaxMagnitude = nil; s.OType = "" }, true},
+	{"collinder", func(s *TargetSearch) {
+	    s.SetKind = "collinder"; s.MaxMagnitude = nil; s.OType = "" }, true},
+	{"caldwell with an object type", func(s *TargetSearch) {
+	    s.SetKind = "caldwell"; s.OType = "GlC" }, false},
 	{"names", func(s *TargetSearch) {
 	    s.SetKind = "names"; s.OType = ""
 	    s.Names = Names{"Vega", "M31"} }, true},

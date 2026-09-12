@@ -4,7 +4,10 @@ from flasgger import Schema, fields
 from marshmallow import validate, validates_schema, ValidationError
 
 
-SET_KINDS = ["planets", "messier", "category", "names"]
+# The object-list kinds are the keys of lists.LISTS, spelled out so the
+# schema needs no catalog module.
+SET_KINDS = ["planets", "messier", "caldwell", "herschel400", "melotte",
+             "collinder", "category", "names"]
 
 # What an object-type code may be made of; see catalog.OTYPE_PATTERN,
 # which is the check that actually guards the ADQL. Repeated here as a
@@ -96,7 +99,7 @@ class TargetSetSchema(Schema):
     max_magnitude = fields.Float(required=False, allow_none=True,
                                  validate=validate.Range(-30, 30), metadata={
         "description": "Keep objects at or brighter than this visual "
-        "magnitude (required for category, optional for messier)"})
+        "magnitude (required for category, optional for an object list)"})
     otype = fields.String(required=False, allow_none=True,
                           validate=validate.Regexp(OTYPE_RE), metadata={
         "description": "SIMBAD object-type code for the category kind, "
