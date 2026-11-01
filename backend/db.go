@@ -6,6 +6,7 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "log"
     "math"
     "os"
     "regexp"
@@ -441,7 +442,32 @@ func MigrateDB(DB *gorm.DB) error {
     DB.AutoMigrate(&Position{})
     DB.AutoMigrate(&TargetSearch{})
     DB.AutoMigrate(&TargetObject{})
+    PurgeDeletedCandidates(DB)
     return nil
+}
+
+/* Delete candidate rows that were left behind soft-deleted.
+
+A TargetObject is never meant to be soft-deleted: replaceCandidates is
+the only code that removes one, and it replaces a search's candidates
+as a unit. A row with deleted_at set is therefore unreachable garbage.
+They accumulated because gorm.G dropped the Unscoped flag that delete
+asked for (OBS-21), so every re-evaluation abandoned the previous
+candidates;
+with per-day records attached each abandoned row also carries its whole
+grid. Idempotent and cheap once the backlog is gone, which is why it
+can sit in the startup path. */
+func PurgeDeletedCandidates(DB *gorm.DB) (int64, error) {
+    result := DB.Unscoped().Where(
+	"deleted_at IS NOT NULL").Delete(&TargetObject{})
+    if result.Error != nil {
+	log.Printf("purging soft-deleted candidates failed: %v", result.Error)
+	return 0, result.Error
+    }
+    if result.RowsAffected > 0 {
+	log.Printf("purged %d soft-deleted candidate rows", result.RowsAffected)
+    }
+    return result.RowsAffected, nil
 }
 
 // Initialize a test user and some test data. In production use this
