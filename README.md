@@ -256,6 +256,39 @@ already were. The Herschel 400 list follows the Astronomical League's
 program list; every entry of every list was checked to resolve, and a
 network-marked test rechecks that.
 
+### 0.15.0
+
+Long-period searches. A search's day range grows from 31 days to a full
+year, and every evaluation now produces a record per candidate per day
+rather than a single matched flag: how long the target qualified that
+day, the highest altitude it reached while qualifying, the darkest sky
+it reached, and when its altitude peaked. Days a target never qualifies
+on get no record, so "when is Jupiter best over the next six months" is
+answered by the records themselves. A new observability calendar, opened
+from the top bar, draws one row per target and one cell per day, shaded
+by whichever of those metrics you pick, with each target's best periods
+spelled out in words; clicking a day sets the date, closes the calendar
+and leaves the sky view showing that night.
+
+The sky view is date-aware as a result: inside a search's evaluated
+range it draws only the targets observable on the date shown, instead
+of everything that matched on any night of the range. Outside the
+range, and for any search saved before this version, it falls back to
+drawing every match and says so.
+
+Durations are interpolated to the instant a target enters and leaves
+observability rather than counted in 30-minute samples, so days can be
+ranked without ties. Making a year-long evaluation finish in seconds
+needed the astro backend to stop evaluating ephemerides per sample: it
+now interpolates each body's geocentric position from a coarse daily
+grid and transforms every body in one call, which takes the largest
+permitted evaluation from about 79 seconds to about 5, accurate to
+0.0002 degrees of altitude. Jupiter and Saturn over six months of
+nightly windows evaluate in about a second. A search also records the
+coordinates and observation window it was evaluated with, so editing
+that position marks the stored result stale instead of silently
+misleading.
+
 ## Next steps
 
 - On-hover infobox for the objects

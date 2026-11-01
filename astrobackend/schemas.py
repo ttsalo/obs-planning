@@ -19,7 +19,14 @@ BRIGHTNESSES = ["N", "AT", "NT", "CT", "D"]
 
 # Sizing limits shared with the Go server and the frontend.
 MAX_CANDIDATES = 2000
-MAX_WINDOWS = 31
+# One window per day of a search's day range, which spans at most a year.
+MAX_WINDOWS = 366
+# Candidates times windows: the real size limit, since it bounds both the
+# records stored per search and what one request computes. 65000 covers a
+# full object list over a year (Messier is 110 x 366 = 40260) and keeps
+# the largest range-and-set combination that was legal before per-day
+# records existed (2000 x 31 = 62000). See the long-period-search design.
+MAX_CELLS = 65000
 
 
 class GetObjPostSchema(Schema):
@@ -197,6 +204,15 @@ class FilterTargetsResultSchema(Schema):
     matched = fields.List(fields.Boolean(), metadata={
         "description": "One flag per candidate, in request order"})
     count = fields.Integer()
+    days = fields.List(fields.List(fields.List(fields.Raw())), metadata={
+        "description": "Per-candidate observability records, in request "
+        "order. Each candidate's entry holds one record per window it "
+        "qualifies in, as [window index, qualifying hours, highest "
+        "altitude while qualifying, darkest Sun upper-limb altitude "
+        "while qualifying, minutes from the window's start to the "
+        "altitude peak]. A window a candidate never qualifies in has no "
+        "record, so the grid is sparse and a candidate with no records "
+        "is one that did not match."})
 
 
 class GetObjsTargetSchema(Schema):

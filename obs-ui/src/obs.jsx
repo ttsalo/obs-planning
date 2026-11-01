@@ -12,6 +12,7 @@ import { useSearches } from './searches.jsx'
 import { altToBrightness, brightnessChangeToAlt, checkObsWindow,
 	 findUpcomingTransitions, findNextTransition } from './transitions.jsx'
 import { CategoryIcon, IconSheet, objStrokeWidth } from './icons.jsx'
+import { targetsForDate } from './observability.js'
 
 // Artistic representations of solar system objects
 const objMap = new Map();
@@ -781,6 +782,21 @@ function CoordGrid() {
 	    </Group>);
 };
 
+/* The selected search's per-day observability records, fetched on
+   their own key rather than with the searches listing: a full year of
+   an object list's records is about a megabyte and the listing is
+   refetched whenever a dialog opens or a mutation invalidates it. One
+   search's grid is bounded, so this single fetch serves both the sky
+   view and the calendar. */
+export function useSearchDays(search) {
+    return useQuery({
+	queryKey: ["searchDays", search?.ID],
+	enabled: search?.ID != null,
+	queryFn: async () => (
+	    await axios.get(`/api/searches/${search.ID}/days`)).data,
+    });
+}
+
 const ObsStage = ({setSession}) => {
     const session = useContext(SessionContext);
     const stageSize = useContext(StageContext);
@@ -822,14 +838,17 @@ const ObsStage = ({setSession}) => {
     const searches = searchQ.data;
     const search = searches?.find((i) => (i.name == session?.search))
 
-    // The objects to draw: the selected search's matched candidates.
-    // Unmatched ones never reach the canvas, and the Sun is drawn on
-    // its own regardless, so a "Sun" in a name list is skipped rather
-    // than drawn twice. No search (or one still being selected by the
-    // fallback below) means the Sun alone. Their current positions
-    // come from one batch request per refresh, however many there are.
-    const targets = (search?.TargetObjects || []).filter(
-	(obj) => obj.matched && obj.name != "Sun");
+    /* The objects to draw: the candidates of the selected search that
+       are observable on the date the application is showing, or every
+       matched one where there is no per-day record to go on (see
+       targetsForDate). The Sun is drawn on its own regardless, so a
+       "Sun" in a name list is skipped rather than drawn twice. No
+       search, or one still being selected by the fallback below, means
+       the Sun alone. Their current positions come from one batch
+       request per refresh, however many there are. */
+    const daysQ = useSearchDays(search);
+    const {targets, byDay, hasDays} = targetsForDate(
+	search, daysQ.data, stageSize.get("date"));
     const batchQ = useBatchPositions(targets, pos, stageSize);
     if (batchQ.error) { console.log(`error=${batchQ.error}`) };
     const entries = (targets.length > 0 && batchQ.data) || [];
@@ -972,6 +991,17 @@ const ObsStage = ({setSession}) => {
 					startIndex={hovered.startIndex} pos={pos}
 					coords={coordsOf(targetByName(hovered.target))}>
 		 </HoveredSegmentTooltip>}
+		{hasDays && !byDay &&
+		 /* The search knows which nights each object is
+		    observable, but the shown date is outside the range
+		    it was evaluated over, so these are its matches for
+		    any night rather than for this one. Said out loud
+		    because otherwise the view changes meaning silently
+		    as the date crosses the range's edge. */
+		 <Text text="Showing matches for any night in the search's range"
+		       x={10} y={8} fontSize={13} fill="gray"
+		       listening={false}>
+		 </Text>}
 	    </Layer>
 	   )
 };

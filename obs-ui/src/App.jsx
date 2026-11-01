@@ -8,6 +8,7 @@ import ObsStage from './obs.jsx';
 import { SessionContext, StageContext } from './session.jsx'
 import PositionsDialog from './positions.jsx'
 import SearchesDialog, { useSearches } from './searches.jsx'
+import ObservabilityCalendar from './calendar.jsx'
 import { useAstroBase } from './config.jsx'
 
 const App = () => {
@@ -124,6 +125,7 @@ const App = () => {
     };
 
     const [isSearchesOpen, setIsSearchesOpen] = useState(false);
+    const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
     // The session names the selected position; until it has loaded
     // there's nothing to name yet.
@@ -148,10 +150,17 @@ const App = () => {
     };
 
     const onDateChange = (date, dateString) => {
+	setShownDate(date);
+	console.log(date, dateString);
+    };
+
+    // Also called by the observability calendar when a day is
+    // activated there, which is what closes the loop between seeing
+    // that a night is good and seeing that night's sky.
+    const setShownDate = (date) => {
 	const newStageMap = new Map(stageSize);
 	newStageMap.set("date", date);
 	setStageSize(newStageMap);
-	console.log(date, dateString);
     };
 
     return <SessionContext value={session}>
@@ -180,6 +189,7 @@ const App = () => {
 							   }}}>
 				       <Space.Compact>
 					   <DatePicker
+					       value={stageSize.get("date")}
 					       onChange={onDateChange} />
 				       </Space.Compact>
 				       <Space.Compact>
@@ -226,6 +236,18 @@ const App = () => {
 				       setSession={setSession}
 				       shownDate={stageSize.get("date")}>
 				   </SearchesDialog>
+				   <Button type="text"
+					   onClick={() => setIsCalendarOpen(true)}>
+				       <Typography.Text strong={true}>
+					   Calendar
+				       </Typography.Text>
+				   </Button>
+				   <ObservabilityCalendar
+				       open={isCalendarOpen}
+				       onClose={() => setIsCalendarOpen(false)}
+				       session={session}
+				       onPickDate={setShownDate}>
+				   </ObservabilityCalendar>
 			       </Space>
 			   </Flex>
 		       </ConfigProvider>
