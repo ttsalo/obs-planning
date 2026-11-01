@@ -228,21 +228,34 @@ func findSearch(t *testing.T, id uint) *TargetSearch {
     return nil
 }
 
-// Rows in target_objects for a search, deleted ones included, straight
-// from the table.
+/* Rows in target_objects for a search, deleted ones included, straight
+from the table.
+
+The classic API, not gorm.G: gorm.G starts a new session whose fresh
+statement drops the Unscoped flag, so gorm.G[T](db.Unscoped()) counts
+only the live rows. This helper exists to see the soft-deleted ones,
+so using gorm.G here would quietly defeat the very test it serves. */
 func candidateRowCount(searchID uint) int64 {
-    count, _ := gorm.G[TargetObject](sqlite_db.Unscoped()).Where(
-	"target_search_id = ?", searchID).Count(context.Background(), "*")
+    var count int64
+    sqlite_db.Unscoped().Model(&TargetObject{}).Where(
+	"target_search_id = ?", searchID).Count(&count)
+    return count
+}
+
+// Rows for a search that are present but soft-deleted; should always
+// be zero, since a candidate is only ever hard-deleted.
+func softDeletedCandidateCount(searchID uint) int64 {
+    var count int64
+    sqlite_db.Unscoped().Model(&TargetObject{}).Where(
+	"target_search_id = ? AND deleted_at IS NOT NULL", searchID).Count(&count)
     return count
 }
 
 // Drop a search a test created, and its candidates, so the shared
 // in-memory DB is left as found.
 func dropSearch(id uint) {
-    ctx := context.Background()
-    gorm.G[TargetObject](sqlite_db.Unscoped()).Where(
-	"target_search_id = ?", id).Delete(ctx)
-    gorm.G[TargetSearch](sqlite_db.Unscoped()).Where("id = ?", id).Delete(ctx)
+    sqlite_db.Unscoped().Where("target_search_id = ?", id).Delete(&TargetObject{})
+    sqlite_db.Unscoped().Where("id = ?", id).Delete(&TargetSearch{})
 }
 
 const doublesCandidatesJSON = `[` +
@@ -834,4 +847,63 @@ func TestCreateSearchCellLimit(t *testing.T) {
     assert.Contains(t, rec.Body.String(), "73200")
     assert.Contains(t, rec.Body.String(), fmt.Sprint(MaxSearchCells))
     assert.NotContains(t, searchNames(t), "Bad")
+}
+
+// --- candidates are hard-deleted --------------------------------------
+
+/* A re-evaluation must not leave its old candidate rows behind.
+
+These assertions name the defect directly: candidateRowCount catches it
+too, but only since its own gorm.G call was fixed. Both the helper and
+the code under test dropped the Unscoped flag the same way, so the
+check at the end of TestUpdateSearchReplacesCandidates sat green
+through the whole period the rows were accumulating. */
+func TestUpdateSearchLeavesNothingSoftDeleted(t *testing.T) {
+    created := createSearch(t, doublesJSON)
+    defer dropSearch(created.ID)
+    assert.Equal(t, int64(2), candidateRowCount(created.ID))
+    assert.Equal(t, int64(0), softDeletedCandidateCount(created.ID))
+
+    rec := searchRequest(t, http.MethodPut, searchJSON("Bright doubles",
+	`[{"name":"Mizar","ra":200.98,"dec":54.93,"matched":true}]`),
+	fmt.Sprint(created.ID), h.updateSearch)
+    assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+    assert.Equal(t, int64(1), candidateRowCount(created.ID))
+    assert.Equal(t, int64(0), softDeletedCandidateCount(created.ID))
+}
+
+// Deleting a search takes its candidates with it, rows and all; the
+// search itself stays soft-deleted as before.
+func TestDeleteSearchLeavesNothingSoftDeleted(t *testing.T) {
+    created := createSearch(t, doublesJSON)
+    rec := searchRequest(t, http.MethodDelete, "", fmt.Sprint(created.ID),
+	h.deleteSearch)
+    assert.Equal(t, http.StatusNoContent, rec.Code)
+    assert.Equal(t, int64(0), candidateRowCount(created.ID))
+    assert.Equal(t, int64(0), softDeletedCandidateCount(created.ID))
+}
+
+// The startup purge clears rows abandoned before the fix.
+func TestPurgeDeletedCandidates(t *testing.T) {
+    created := createSearch(t, doublesJSON)
+    defer dropSearch(created.ID)
+
+    // Soft-delete one the way the old code did, so there is something
+    // to purge.
+    assert.Nil(t, sqlite_db.Where("target_search_id = ? AND name = ?",
+	created.ID, "Albireo").Delete(&TargetObject{}).Error)
+    assert.Equal(t, int64(2), candidateRowCount(created.ID))
+    assert.Equal(t, int64(1), softDeletedCandidateCount(created.ID))
+
+    purged, err := PurgeDeletedCandidates(sqlite_db)
+    assert.Nil(t, err)
+    assert.True(t, purged >= 1, "expected at least the one row purged")
+    assert.Equal(t, int64(1), candidateRowCount(created.ID))
+    assert.Equal(t, int64(0), softDeletedCandidateCount(created.ID))
+
+    // Idempotent: nothing left to find on a second run.
+    again, err := PurgeDeletedCandidates(sqlite_db)
+    assert.Nil(t, err)
+    assert.Equal(t, int64(0), again)
 }

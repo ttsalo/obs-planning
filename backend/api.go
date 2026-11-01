@@ -548,12 +548,20 @@ func (h *Handler) bindSearch(c echo.Context, search *TargetSearch,
 }
 
 /* Replace a search's candidates. Hard-deleted rather than soft-deleted:
-every re-evaluation replaces up to 2000 rows, and nothing wants the old
-ones back. */
+every re-evaluation replaces up to 2000 rows, each carrying its per-day
+records, and nothing wants the old ones back.
+
+Deliberately the classic API rather than gorm.G. gorm.G opens a new
+session, whose fresh Statement inherits Unscoped only when
+Config.PropagateUnscoped is set, so gorm.G[T](tx.Unscoped()) silently
+soft-deletes instead; GORM 1.31's generics API has no Unscoped of its
+own. WithContext first so the flag lands on a cloned statement and
+cannot leak into the rest of the transaction. */
 func replaceCandidates(ctx context.Context, tx *gorm.DB, searchID uint,
 	rows []TargetObject) error {
-    if _, err := gorm.G[TargetObject](tx.Unscoped()).Where(
-	"target_search_id = ?", searchID).Delete(ctx); err != nil {
+    if err := tx.WithContext(ctx).Unscoped().Where(
+	"target_search_id = ?", searchID).Delete(
+	&TargetObject{}).Error; err != nil {
 	return err
     }
     for i := range rows {
