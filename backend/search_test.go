@@ -857,7 +857,7 @@ These assertions name the defect directly: candidateRowCount catches it
 too, but only since its own gorm.G call was fixed. Both the helper and
 the code under test dropped the Unscoped flag the same way, so the
 check at the end of TestUpdateSearchReplacesCandidates sat green
-through the whole period the rows were accumulating. */
+through the whole period the rows were accumulating (OBS-21). */
 func TestUpdateSearchLeavesNothingSoftDeleted(t *testing.T) {
     created := createSearch(t, doublesJSON)
     defer dropSearch(created.ID)

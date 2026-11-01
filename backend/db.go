@@ -452,7 +452,8 @@ A TargetObject is never meant to be soft-deleted: replaceCandidates is
 the only code that removes one, and it replaces a search's candidates
 as a unit. A row with deleted_at set is therefore unreachable garbage.
 They accumulated because gorm.G dropped the Unscoped flag that delete
-asked for, so every re-evaluation abandoned the previous candidates;
+asked for (OBS-21), so every re-evaluation abandoned the previous
+candidates;
 with per-day records attached each abandoned row also carries its whole
 grid. Idempotent and cheap once the backlog is gone, which is why it
 can sit in the startup path. */

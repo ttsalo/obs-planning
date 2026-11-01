@@ -556,7 +556,7 @@ session, whose fresh Statement inherits Unscoped only when
 Config.PropagateUnscoped is set, so gorm.G[T](tx.Unscoped()) silently
 soft-deletes instead; GORM 1.31's generics API has no Unscoped of its
 own. WithContext first so the flag lands on a cloned statement and
-cannot leak into the rest of the transaction. */
+cannot leak into the rest of the transaction (OBS-21). */
 func replaceCandidates(ctx context.Context, tx *gorm.DB, searchID uint,
 	rows []TargetObject) error {
     if err := tx.WithContext(ctx).Unscoped().Where(
