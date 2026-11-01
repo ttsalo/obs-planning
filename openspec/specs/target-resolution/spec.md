@@ -140,12 +140,14 @@ the minimum or less than the maximum (the window wraps through north);
 `horizon` means altitude above 0; `none` always holds. Brightness is
 judged from the altitude of the Sun's upper
 limb at the sample: `N` requires below -18 degrees, `AT` below -12, `NT`
-below -6, `CT` below 0, and `D` always holds. At most 31 windows MUST be
-accepted, each at most 24 hours long, and a window whose end precedes
+below -6, `CT` below 0, and `D` always holds. At most 366 windows MUST be
+accepted, each at most 24 hours long, the candidate count multiplied by the
+window count MUST NOT exceed 65000, and a window whose end precedes
 its start MUST be rejected as invalid input. With no windows, or with
 visibility `none` and brightness `D`, every candidate is matched. The
 response SHALL give one matched flag per candidate, in the request's
-order, and the number matched.
+order, the number matched, and each candidate's per-window observability
+records.
 
 #### Scenario: Object visible only mid-window matched
 - **WHEN** a candidate is below the horizon at a window's start and end
@@ -180,8 +182,17 @@ order, and the number matched.
 - **THEN** the flags are returned normally
 
 #### Scenario: Too many windows
-- **WHEN** 32 windows are given
+- **WHEN** 367 windows are given
 - **THEN** the request is rejected as invalid input
+
+#### Scenario: Combined size limit
+- **WHEN** 400 candidates are filtered over 366 windows, which is 146400
+  candidate-windows
+- **THEN** the request is rejected as invalid input
+
+#### Scenario: A year of nightly windows accepted
+- **WHEN** 9 solar-system candidates are filtered over 366 nightly windows
+- **THEN** the request is accepted and answered
 
 ### Requirement: Batched sky positions
 The service SHALL return, in one request, the current altitude and azimuth
@@ -220,3 +231,82 @@ altitude values as for solar-system bodies.
 #### Scenario: Solar-system path unchanged
 - **WHEN** a timeseries is requested for "jupiter" without RA and Dec
 - **THEN** the response is what the endpoint returned before this change
+
+### Requirement: Per-window observability metrics
+For each candidate and each window in which it qualifies, the service SHALL
+report the window's index in the request, how long the candidate qualified,
+the highest altitude it reached while qualifying, the lowest Sun upper-limb
+altitude reached while qualifying, and the offset from the window's start at
+which the highest altitude occurred. A window in which a candidate never
+qualifies SHALL have no record for it.
+
+#### Scenario: Records identify their window by position
+- **WHEN** a candidate qualifies in the first and third of three windows
+- **THEN** it has two records, identified by the first and third window
+  positions, and none for the second
+
+#### Scenario: Metrics cover only qualifying instants
+- **WHEN** a candidate is highest while the sky is brighter than the
+  brightness limit, and lower while the sky is dark enough
+- **THEN** the reported highest altitude is the lower one and the reported
+  offset points at the instant it occurred
+
+#### Scenario: Candidate qualifying in no window
+- **WHEN** a candidate qualifies in none of the windows
+- **THEN** it is reported as not matched and has no records
+
+#### Scenario: Times are offsets, not wall-clock
+- **WHEN** records are returned for windows the caller supplied as UTC
+  instants
+- **THEN** each record locates itself by window position and an offset from
+  that window's start, and the response contains no wall-clock date or time
+  zone
+
+### Requirement: Qualifying duration is interpolated
+The reported qualifying duration SHALL be derived by interpolating the
+instants at which a candidate crosses into and out of qualification between
+samples, rather than by multiplying a count of qualifying samples by the
+sampling step, so that durations are not quantised to the 30-minute step.
+
+#### Scenario: Duration finer than the sampling step
+- **WHEN** a candidate crosses the visibility threshold partway between two
+  samples
+- **THEN** the reported duration is not a whole multiple of 30 minutes
+
+#### Scenario: Two days distinguished
+- **WHEN** a candidate qualifies in two windows for durations differing by
+  less than 30 minutes
+- **THEN** the two reported durations differ
+
+### Requirement: Solar-system accuracy under long grids
+However the service computes solar-system positions over long sample grids,
+the altitudes it filters and reports SHALL agree with a direct per-instant
+ephemeris evaluation to within 0.001 degrees, so that an optimisation for
+long ranges cannot change which candidates qualify.
+
+#### Scenario: Agreement with direct evaluation
+- **WHEN** the Moon and the eight planets are filtered over 180 nightly
+  windows
+- **THEN** every altitude agrees with a direct per-instant ephemeris
+  evaluation to within 0.001 degrees
+
+#### Scenario: Short grids unaffected
+- **WHEN** a single window is filtered
+- **THEN** the altitudes agree with a direct per-instant evaluation to
+  within 0.001 degrees
+
+### Requirement: Largest permitted filter answers within the request budget
+A filter request at the maximum permitted size SHALL be answered within the
+service's request timeout, without the memory held at any instant growing
+with the number of windows.
+
+#### Scenario: Maximum size answered
+- **WHEN** a filter request at the largest permitted candidate and window
+  counts is made
+- **THEN** it is answered rather than timing out
+
+#### Scenario: Memory independent of range length
+- **WHEN** the same candidate list is filtered over 366 windows and over 31
+  windows
+- **THEN** the peak memory of the longer request is not materially greater
+  than that of the shorter one

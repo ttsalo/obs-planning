@@ -30,7 +30,7 @@ anything but a code; every other set kind MUST be stored without one. The
 time window is a start and an end wall-clock time in `HH:MM`; when the end
 is not later than the start the window runs past midnight into the next
 day. The day range, when given, is a start and an end calendar date with
-the end not before the start and spanning at most 31 days. The visibility
+the end not before the start and spanning at most 366 days. The visibility
 criterion MUST be one of `window` (inside the observation window of the
 position the search is evaluated for), `horizon` (altitude above 0
 degrees) or `none`. The maximum brightness MUST be one of `N` (night),
@@ -72,7 +72,7 @@ to exactly one user and are never visible to other users.
 - **THEN** the request is rejected as invalid input and nothing is stored
 
 #### Scenario: Day range too long rejected
-- **WHEN** a search is submitted with a day range of 40 days
+- **WHEN** a search is submitted with a day range of 400 days
 - **THEN** the request is rejected as invalid input and nothing is stored
 
 #### Scenario: Unknown enumeration value rejected
@@ -105,9 +105,12 @@ it was last evaluated, before any visibility or brightness criteria were
 applied. Each candidate has a name, a flag saying whether it is a
 solar-system body, for other objects the right ascension and declination
 in degrees (RA 0 to 360, Dec -90 to 90), an optional visual magnitude and
-object type, and a matched flag saying whether it satisfied the search's
-criteria at the last evaluation. The search SHALL also record when it was
-evaluated and the name of the position it was evaluated for. Candidates
+object type, a matched flag saying whether it satisfied the search's
+criteria at the last evaluation, and its per-day observability records for
+the days of the evaluated range on which it qualified. The search SHALL
+also record when it was evaluated, the name of the position it was
+evaluated for, and the coordinates and observation window that evaluation
+used. Candidates
 are submitted together with the definition on create and update and
 replace the previous candidates as a whole; a search MAY be stored with
 zero candidates, and MAY be stored with candidates none of which are
@@ -133,17 +136,43 @@ matched.
 - **WHEN** a search is submitted whose set resolved to no objects
 - **THEN** the search is stored with an empty candidate list
 
+#### Scenario: Per-day records replaced with the candidates
+- **WHEN** a search evaluated over a 30-day range is updated with
+  candidates carrying per-day records for a different 60-day range
+- **THEN** the previous per-day records are gone and only the new ones
+  remain
+
+#### Scenario: Evaluation details stored
+- **WHEN** a search is saved after being evaluated for a position at
+  latitude 60.17 and longitude 24.94 with a given observation window
+- **THEN** the stored search records those coordinates and that window
+  alongside the position's name
+
+#### Scenario: Candidate stored without per-day records
+- **WHEN** a candidate is submitted with no per-day records because it
+  qualified on no day of the range
+- **THEN** the candidate is stored, not matched, and with no per-day records
+
 ### Requirement: Listing searches
 The system SHALL return the authenticated user's searches, each with its
 identifier, name, definition, evaluation record and candidates, and MUST
-NOT include searches belonging to other users.
+NOT include searches belonging to other users. The evaluation record
+includes the coordinates and observation window the evaluation used. The
+listing MUST NOT include candidates' per-day observability records, so that
+its size does not grow with the length of a search's day range.
 
 #### Scenario: List own searches
 - **WHEN** an authenticated user requests their searches
 - **THEN** every search they own is returned with its id, name, set,
   magnitude limit, names, time window, day range, visibility, brightness,
-  evaluation time and position, and candidates with their matched flags,
-  and no other user's searches appear
+  evaluation time, position and the coordinates and window the evaluation
+  used, and candidates with their matched flags but without their per-day
+  records, and no other user's searches appear
+
+#### Scenario: Listing size independent of the range
+- **WHEN** a user whose search has 110 candidates evaluated over a 180-day
+  range requests their searches
+- **THEN** the response carries the 110 candidates and no per-day records
 
 ### Requirement: Creating searches
 An authenticated user SHALL be able to create a new search. On success the
@@ -229,9 +258,11 @@ searches dialog.
 
 ### Requirement: Searches dialog
 The searches dialog SHALL list all of the user's searches with their name,
-a summary of the set, the number of matched candidates out of the total
-and when they were evaluated, indicate which one is selected, and offer
-add, edit and delete actions.
+a summary of the set, the number of matched candidates out of the total,
+the day range they were evaluated over and when they were evaluated,
+indicate which one is selected, mark a search whose stored evaluation no
+longer matches its position as stale, and offer add, edit and delete
+actions.
 Selecting a search SHALL persist the choice in the session so it survives
 a page reload. The add and edit forms SHALL cover the whole definition,
 default new searches to window 22:00-02:00, no day range, visibility
@@ -263,6 +294,15 @@ message to the user without closing the form.
   searches
 - **THEN** the form stays open and shows the rejection message
 
+#### Scenario: Range shown in the list
+- **WHEN** a search was evaluated over the range 1 November to 29 April
+- **THEN** the list shows that range alongside its evaluation time
+
+#### Scenario: Stale search marked
+- **WHEN** the coordinates of the position a search was evaluated for have
+  been edited since the evaluation
+- **THEN** the list marks that search as stale
+
 ### Requirement: Evaluate before save
 The add and edit forms SHALL require an explicit evaluation step before
 the search can be saved. Evaluation has two parts. Resolution turns the
@@ -273,11 +313,13 @@ and otherwise the candidates already held by the form (loaded from the
 saved search or from the previous resolution) are reused without any
 catalog access. Filtering then applies the criteria to the candidates for
 the currently selected position (its coordinates and observation window)
-over the windows the definition describes, where a definition without a
-day range means the single night that begins on the date the application
-is currently showing. The form then shows every candidate with its match
-status, how many matched out of how many candidates, and any names that
-could not be resolved. Save MUST be unavailable until an evaluation has
+over the windows the definition describes, one window per day of the day
+range, where a definition without a day range means the single night that
+begins on the date the application is currently showing. Filtering SHALL
+produce a per-day observability record for each candidate and each day of
+the range on which it qualified. The form then shows every candidate with
+its match status, how many matched out of how many candidates, and any
+names that could not be resolved. Save MUST be unavailable until an evaluation has
 completed for the current definition, and changing any part of the
 definition after evaluating MUST clear the match status and make Save
 unavailable again; changing the target set MUST additionally discard the
@@ -288,8 +330,9 @@ closing it.
 #### Scenario: Evaluate then save
 - **WHEN** the user fills in a definition, evaluates it, and saves
 - **THEN** the stored search's candidates are exactly the objects the
-  resolution returned, the matched flags are exactly what the filtering
-  showed, and its evaluation record names the selected position
+  resolution returned, the matched flags and per-day records are exactly
+  what the filtering produced, and its evaluation record names the selected
+  position and the coordinates and observation window used
 
 #### Scenario: Save without evaluation
 - **WHEN** the user fills in a definition and has not evaluated it
@@ -330,10 +373,27 @@ closing it.
 - **THEN** the form shows an error saying the catalog was unavailable and
   keeps the entered definition
 
+#### Scenario: Long range evaluated in one step
+- **WHEN** the user evaluates a definition whose day range spans 180 days
+- **THEN** the filtering covers all 180 days and the form can be saved with
+  the per-day records of every candidate
+
+#### Scenario: Re-applying criteria over a range needs no catalog
+- **WHEN** the user opens a saved `messier` search, widens its day range
+  and evaluates while the catalog service cannot be reached
+- **THEN** the stored candidates are filtered over the new range, the
+  per-day records are produced and the search can be saved
+
+#### Scenario: Evaluation too large
+- **WHEN** the user evaluates a definition whose candidate count times day
+  count exceeds the permitted maximum
+- **THEN** the form stays open and shows a message naming the candidate
+  count, the day count and the limit
+
 ### Requirement: Sky view renders the selected search's matches
-The sky view SHALL draw a marker for every matched candidate of the
-selected search at its current position as seen from the selected
-position, refreshed on the same cadence as today's planet markers, using
+The sky view SHALL draw a marker for every candidate of the
+selected search that qualifies on the date the application is showing, at
+its current position as seen from the selected position, refreshed on the same cadence as today's planet markers, using
 the existing artistic markers for solar-system bodies and a category
 icon for other objects. Every object category the searches dialog
 offers SHALL have an icon of its own, drawn in the sky view's simplified
@@ -350,14 +410,20 @@ otherwise; a type marked as a candidate ("(candidate)") draws as the
 type it is a candidate of. An object MUST NOT be left undrawn for want
 of an icon. An icon's footprint MUST stay within the area today's
 markers occupy, so hovering, tapping and clicking a marker behave as
-before. Unmatched candidates MUST NOT be drawn. Hovering or tapping a
+before. A candidate that does not qualify on
+the shown date MUST NOT be drawn. When the shown date lies outside the
+search's evaluated day range, or the search has no per-day records at all,
+every matched candidate SHALL be drawn instead, and the view SHALL indicate
+that it is showing the search's matches for any day rather than for the
+shown date. Hovering or tapping a
 marker SHALL show a tooltip with its name and, for non-solar-system
-objects, its object type and magnitude. When the search has at most 10
-matched candidates, a 24-hour path SHALL be drawn for every one of them
-as today; when it has more, a path SHALL be drawn only for the one whose
-marker is hovered or tapped. The Sun's marker and path are drawn
-regardless of the search. Updating the selected search's candidates or
-match flags MUST cause the view to show the new matches without a page
+objects, its object type and magnitude. When at most 10 candidates are drawn, a
+24-hour path SHALL be drawn for every one of them as today; when more are
+drawn, a path SHALL be drawn only for the one whose marker is hovered or
+tapped. The Sun's marker and path are drawn
+regardless of the search. Updating the selected search's candidates,
+match flags or per-day records, or changing the date the application is
+showing, MUST cause the view to show the new set of objects without a page
 reload.
 
 #### Scenario: Small search draws all paths
@@ -365,14 +431,14 @@ reload.
 - **THEN** every planet has a marker and a path, as before this change
 
 #### Scenario: Large search draws paths on demand
-- **WHEN** the selected search has 60 matched Messier objects and the user
-  hovers M31
+- **WHEN** the selected search has 60 matched Messier objects, the shown
+  date lies outside its evaluated day range, and the user hovers M31
 - **THEN** all 60 markers are shown, only M31's path is drawn, and the path
   disappears when the hover ends
 
 #### Scenario: Unmatched candidates hidden
-- **WHEN** the selected search has 110 Messier candidates of which 40 are
-  matched
+- **WHEN** the selected search has no day range and 110 Messier candidates
+  of which 40 are matched
 - **THEN** exactly 40 markers are drawn
 
 #### Scenario: Fixed-object tooltip
@@ -421,6 +487,42 @@ reload.
 #### Scenario: Candidate types draw as their base type
 - **WHEN** a candidate's type is "Galaxy (candidate)"
 - **THEN** it draws with the galaxy icon
+
+#### Scenario: Only the shown date's qualifiers are drawn
+- **WHEN** the selected search was evaluated over a 180-day range, the
+  shown date is inside it, and 12 of its 60 matched candidates have a
+  per-day record for that date
+- **THEN** exactly those 12 are drawn, and each of them gets a path because
+  at most 10 are not drawn only when more than 10 qualify
+
+#### Scenario: Changing the date changes the objects
+- **WHEN** the user moves the shown date to the next day of the evaluated
+  range, on which a different set of candidates qualifies
+- **THEN** the view draws that day's qualifying candidates without a page
+  reload
+
+#### Scenario: A night with nothing observable
+- **WHEN** the shown date is inside the evaluated range and no candidate
+  has a per-day record for it
+- **THEN** no search objects are drawn, and the Sun's marker and path are
+  still drawn
+
+#### Scenario: Date outside the evaluated range falls back
+- **WHEN** the shown date lies outside the selected search's evaluated day
+  range
+- **THEN** every matched candidate is drawn and the view indicates that it
+  is showing matches for any day rather than for the shown date
+
+#### Scenario: Search saved before per-day evaluation
+- **WHEN** the selected search has candidates and matched flags but no
+  per-day records
+- **THEN** every matched candidate is drawn whatever the shown date, as
+  before this change
+
+#### Scenario: Paths follow the drawn count
+- **WHEN** a search with 60 matched candidates has 8 qualifying on the
+  shown date
+- **THEN** all 8 are drawn and each of them gets a path
 
 ### Requirement: Missing selected search falls back
 If the session's selected search does not match any of the user's
@@ -518,3 +620,64 @@ on one screen. Without the fragment the sky view MUST be unaffected.
 #### Scenario: Sky unaffected otherwise
 - **WHEN** the application is opened without the fragment
 - **THEN** the sky view renders the selected search's matches as before
+
+### Requirement: Evaluation size limit
+The number of candidates multiplied by the number of days in a search's day
+range MUST NOT exceed 65000. An evaluation or a save that would exceed it
+MUST be rejected as invalid input, with a message naming the candidate
+count, the day count and the limit.
+
+#### Scenario: A list over a full year is accepted
+- **WHEN** a 110-candidate Messier search is evaluated over a 366-day range,
+  which is 40260 candidate-days
+- **THEN** the evaluation is accepted
+
+#### Scenario: Today's largest search stays accepted
+- **WHEN** a 2000-candidate search is evaluated over a 31-day range, which
+  is 62000 candidate-days
+- **THEN** the evaluation is accepted
+
+#### Scenario: A large list over a full year is rejected
+- **WHEN** a 400-candidate Herschel 400 search is evaluated over a 366-day
+  range, which is 146400 candidate-days
+- **THEN** the request is rejected as invalid input and the message names
+  400, 366 and the limit
+
+#### Scenario: Save rejected independently of evaluation
+- **WHEN** a search is submitted for storage with candidates and a day
+  range whose product exceeds the limit
+- **THEN** the request is rejected as invalid input and nothing is stored
+
+### Requirement: Stale evaluation
+A search's stored evaluation SHALL be reported as stale when the position it
+was evaluated for still exists but the coordinates it was evaluated with
+differ from that position's current coordinates, or, when the search's
+visibility is `window`, the observation window it was evaluated with differs
+from the position's current window. A search stored without evaluation
+coordinates MUST NOT be reported as stale.
+
+#### Scenario: Coordinates edited after evaluation
+- **WHEN** the latitude of the position a search was evaluated for is
+  changed after the evaluation
+- **THEN** the search is reported as stale
+
+#### Scenario: Window edited and the search uses it
+- **WHEN** the observation window of the position a search with visibility
+  `window` was evaluated for is changed after the evaluation
+- **THEN** the search is reported as stale
+
+#### Scenario: Window edited but the search ignores it
+- **WHEN** the observation window of the position a search with visibility
+  `horizon` was evaluated for is changed, and its coordinates are unchanged
+- **THEN** the search is not reported as stale, because the evaluation never
+  consulted the window
+
+#### Scenario: Nothing to compare against
+- **WHEN** a search saved before evaluation coordinates were recorded is
+  listed
+- **THEN** it is not reported as stale
+
+#### Scenario: Freshly evaluated search
+- **WHEN** a search is evaluated and saved for the currently selected
+  position, which is then left unchanged
+- **THEN** it is not reported as stale
