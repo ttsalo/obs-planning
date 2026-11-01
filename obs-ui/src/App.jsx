@@ -45,7 +45,7 @@ const App = () => {
     };
 
     // State to track current scale and dimensions
-    var stageMap = new Map();
+    const stageMap = new Map();
     stageMap.set("width", sceneWidth);
     stageMap.set("height", sceneHeight);
     stageMap.set("scale", 1.0);
@@ -67,12 +67,18 @@ const App = () => {
     const [stageSize, setStageSize] = useState(stageMap)
 
     // Update the render time every minute, triggers re-rendering
-    // the observation canvas
+    // the observation canvas. The new timestamp has to go onto the
+    // *previous* map rather than onto a copy of the stageSize this
+    // effect closed over on mount: selecting a date or a time replaces
+    // the map, so writing the mount-time one back every minute put the
+    // view on realtime again and emptied the date picker (OBS-20).
     useEffect(() => {
 	const intervalId = setInterval(() => {
-	    const newStageMap = new Map(stageSize);
-	    newStageMap.set("renderts", new Date());
-	    setStageSize(newStageMap);
+	    setStageSize((prevStageMap) => {
+		const newStageMap = new Map(prevStageMap);
+		newStageMap.set("renderts", new Date());
+		return newStageMap;
+	    });
 	}, 60 * 1000);
 	return () => clearInterval(intervalId);
     }, []);
@@ -87,26 +93,33 @@ const App = () => {
 	// Get container width
 	const containerWidth = containerRef.current.offsetWidth;
 
-	// Layer presentation area width in degrees
-	const layerWidth = stageMap.get("maxAz") - stageMap.get("minAz");
-	
 	// Calculate scale to show the full layer on the visible area
 	//const scale = containerWidth / layerWidth;
 	const scale = containerWidth / sceneWidth;
 	
-	// Update state with new dimensions
-	stageMap = stageSize;
-	stageMap.set("width", sceneWidth * scale);
-	stageMap.set("height", sceneHeight * scale);
-	stageMap.set("scale", scale);
-	// Set the zoom level (pixels per degree) so that the presentation
-	// area fits on the screen exactly.
-	stageMap.set("zoom", sceneWidth / layerWidth);
-	stageMap.set("azToPx", (az) => { return (az - stageMap.get("minAz")) *
-					 stageMap.get("zoom") });
-	stageMap.set("altToPx", (alt) => {
-	    return (stageMap.get("maxAlt") - alt) * stageSize.get("zoom")});
-	setStageSize(stageMap);
+	// Update state with new dimensions. Built on the previous map for
+	// the same reason as the minute tick above: the resize listener is
+	// registered once, so the stageSize it closed over goes stale as
+	// soon as a date or a time is selected.
+	setStageSize((prevStageMap) => {
+	    const newStageMap = new Map(prevStageMap);
+	    // Layer presentation area width in degrees
+	    const layerWidth = newStageMap.get("maxAz") -
+		  newStageMap.get("minAz");
+	    newStageMap.set("width", sceneWidth * scale);
+	    newStageMap.set("height", sceneHeight * scale);
+	    newStageMap.set("scale", scale);
+	    // Set the zoom level (pixels per degree) so that the presentation
+	    // area fits on the screen exactly.
+	    newStageMap.set("zoom", sceneWidth / layerWidth);
+	    newStageMap.set("azToPx", (az) => {
+		return (az - newStageMap.get("minAz")) *
+		    newStageMap.get("zoom") });
+	    newStageMap.set("altToPx", (alt) => {
+		return (newStageMap.get("maxAlt") - alt) *
+		    newStageMap.get("zoom")});
+	    return newStageMap;
+	});
     };
   
     // Update on mount and when window resizes
@@ -143,9 +156,11 @@ const App = () => {
 
 
     const onTimeChange = (time, timeString) => {
-	const newStageMap = new Map(stageSize);
-	newStageMap.set("time", time);
-	setStageSize(newStageMap);
+	setStageSize((prevStageMap) => {
+	    const newStageMap = new Map(prevStageMap);
+	    newStageMap.set("time", time);
+	    return newStageMap;
+	});
 	console.log(time, timeString);
     };
 
@@ -158,9 +173,11 @@ const App = () => {
     // activated there, which is what closes the loop between seeing
     // that a night is good and seeing that night's sky.
     const setShownDate = (date) => {
-	const newStageMap = new Map(stageSize);
-	newStageMap.set("date", date);
-	setStageSize(newStageMap);
+	setStageSize((prevStageMap) => {
+	    const newStageMap = new Map(prevStageMap);
+	    newStageMap.set("date", date);
+	    return newStageMap;
+	});
     };
 
     return <SessionContext value={session}>
