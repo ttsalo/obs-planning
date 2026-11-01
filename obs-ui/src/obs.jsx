@@ -210,6 +210,11 @@ function CalcRenderTS(stageSize) {
 	ts.setHours(time.hour());
 	ts.setMinutes(time.minute());
 	ts.setSeconds(time.second());
+	// A selected time has to pin the timestamp exactly, milliseconds
+	// included: the result is part of the React Query keys below, so
+	// the leftover milliseconds of each minute's renderts would refetch
+	// every object position for a moment the user has frozen.
+	ts.setMilliseconds(0);
     }
     if (date != null) {
 	ts.setFullYear(date.year());
