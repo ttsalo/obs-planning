@@ -265,6 +265,17 @@ const App = () => {
 				       session={session}
 				       onPickDate={setShownDate}>
 				   </ObservabilityCalendar>
+				   {/* The icon sheet is a URL fragment rather
+				       than a dialog (see obs.jsx), so this is
+				       an anchor and not a button: following it
+				       only sets the hash, which ObsStage picks
+				       up from hashchange without a reload. */}
+				   <Button type="text"
+					   href="/#icons">
+				       <Typography.Text strong={true}>
+					   Icons
+				       </Typography.Text>
+				   </Button>
 			       </Space>
 			   </Flex>
 		       </ConfigProvider>
