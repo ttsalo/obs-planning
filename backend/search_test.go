@@ -97,8 +97,10 @@ func TestTargetSearchValidate(t *testing.T) {
 	    s.StartDate = "01.09.2026"; s.EndDate = "2026-09-02" }, false},
 	{"inverted day range", func(s *TargetSearch) {
 	    s.StartDate = "2026-09-10"; s.EndDate = "2026-09-01" }, false},
+	{"day range of a full year", func(s *TargetSearch) {
+	    s.StartDate = "2026-09-01"; s.EndDate = "2027-09-01" }, true},
 	{"day range too long", func(s *TargetSearch) {
-	    s.StartDate = "2026-09-01"; s.EndDate = "2026-10-11" }, false},
+	    s.StartDate = "2026-09-01"; s.EndDate = "2027-10-11" }, false},
 	{"unknown visibility", func(s *TargetSearch) {
 	    s.Visibility = "sometimes" }, false},
 	{"unknown brightness", func(s *TargetSearch) {
@@ -390,7 +392,7 @@ func TestCreateSearchInvalid(t *testing.T) {
 	    `"visibility":"window","max_brightness":"NT","candidates":[]}`,
 	"day range too long": `{"name":"Bad","set_kind":"planets",` +
 	    `"start_time":"22:00","end_time":"02:00",` +
-	    `"start_date":"2026-09-01","end_date":"2026-10-11",` +
+	    `"start_date":"2026-09-01","end_date":"2027-10-11",` +
 	    `"visibility":"window","max_brightness":"NT","candidates":[]}`,
 	"bad candidate dec": base(`"set_kind":"messier"`,
 	    `[{"name":"M31","ra":10.68,"dec":100}]`),
@@ -596,4 +598,240 @@ func TestDeleteSearchForeign(t *testing.T) {
 func TestDeleteSearchMissing(t *testing.T) {
     rec := searchRequest(t, http.MethodDelete, "", "999999", h.deleteSearch)
     assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// --- per-day observability records ------------------------------------
+
+type daysResponse struct {
+    StartDate string `json:"start_date"`
+    EndDate string `json:"end_date"`
+    DayCount int `json:"day_count"`
+    WindowHours float64 `json:"window_hours"`
+    Objects []ObjectDays `json:"objects"`
+}
+
+func getSearchDays(t *testing.T, id uint) daysResponse {
+    rec := searchRequest(t, http.MethodGet, "", fmt.Sprint(id), h.searchDays)
+    assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+    var out daysResponse
+    if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+	t.Fatal(err)
+    }
+    return out
+}
+
+// A three-day search whose first candidate has records on days 0 and 2.
+func searchWithDaysJSON(name string) string {
+    return `{"name":"` + name + `","set_kind":"planets",` +
+	`"start_time":"22:00","end_time":"02:00",` +
+	`"start_date":"2026-11-01","end_date":"2026-11-03",` +
+	`"visibility":"window","max_brightness":"NT",` +
+	`"evaluated_position":"Helsinki",` +
+	`"evaluated_lat":60.17,"evaluated_lon":24.94,` +
+	`"evaluated_min_az":0,"evaluated_max_az":360,` +
+	`"evaluated_min_alt":10,"evaluated_max_alt":90,` +
+	`"candidates":[` +
+	`{"name":"Jupiter","ss_obj":true,"matched":true,` +
+	`"days":[[0,3.5,45.2,-22.1,120],[2,1.25,30,-18.5,60]]},` +
+	`{"name":"Saturn","ss_obj":true,"matched":false,"days":[]}]}`
+}
+
+func TestSearchDaysRoundTrip(t *testing.T) {
+    created := createSearch(t, searchWithDaysJSON("Ranged"))
+    defer dropSearch(created.ID)
+
+    got := getSearchDays(t, created.ID)
+    assert.Equal(t, "2026-11-01", got.StartDate)
+    assert.Equal(t, "2026-11-03", got.EndDate)
+    assert.Equal(t, 3, got.DayCount)
+    assert.Equal(t, 4.0, got.WindowHours)
+
+    // Only the candidate that has records appears, named and identified.
+    if len(got.Objects) != 1 {
+	t.Fatalf("expected one object with records, got %d", len(got.Objects))
+    }
+    assert.Equal(t, "Jupiter", got.Objects[0].Name)
+    assert.NotEqual(t, uint(0), got.Objects[0].ID)
+    assert.Equal(t, Days{{0, 3.5, 45.2, -22.1, 120}, {2, 1.25, 30, -18.5, 60}},
+	got.Objects[0].Days)
+
+    // The records scan back out of the column, not just out of a cache.
+    var stored []TargetObject
+    if err := sqlite_db.Where("target_search_id = ?", created.ID).Order(
+	    "name").Find(&stored).Error; err != nil {
+	t.Fatal(err)
+    }
+    assert.Equal(t, 2, len(stored))
+    assert.Equal(t, 2, len(stored[0].Days))     // Jupiter
+    assert.Equal(t, 45.2, stored[0].Days[0][DayMaxAlt])
+    assert.Equal(t, Days{}, stored[1].Days)     // Saturn
+}
+
+// The listing is shared by the header, the dialog and the sky view, so
+// it must not grow by a search's whole grid.
+func TestSearchListingOmitsDays(t *testing.T) {
+    created := createSearch(t, searchWithDaysJSON("Ranged"))
+    defer dropSearch(created.ID)
+
+    rec := searchRequest(t, http.MethodGet, "", "", h.searches)
+    assert.Equal(t, http.StatusOK, rec.Code)
+    assert.NotContains(t, rec.Body.String(), "45.2")
+    assert.NotContains(t, rec.Body.String(), `"days"`)
+
+    // The candidates themselves are still there with their flags.
+    stored := findSearch(t, created.ID)
+    if stored == nil {
+	t.Fatal("created search missing from the listing")
+    }
+    assert.Equal(t, 2, len(stored.TargetObjects))
+    assert.True(t, stored.TargetObjects[0].Matched)
+}
+
+func TestSearchDaysEmpty(t *testing.T) {
+    created := createSearch(t, searchJSON("Plain", "[]"))
+    defer dropSearch(created.ID)
+
+    got := getSearchDays(t, created.ID)
+    assert.Equal(t, 0, len(got.Objects))
+    // No day range: there is no range to place a record in.
+    assert.Equal(t, "", got.StartDate)
+    assert.Equal(t, 1, got.DayCount)
+}
+
+func TestSearchDaysForeign(t *testing.T) {
+    asOtherUser(t)
+    theirs := createSearch(t, searchWithDaysJSON("Theirs"))
+    defer dropSearch(theirs.ID)
+    u = "testuser"
+
+    rec := searchRequest(t, http.MethodGet, "", fmt.Sprint(theirs.ID),
+	h.searchDays)
+    assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestSearchDaysMissing(t *testing.T) {
+    rec := searchRequest(t, http.MethodGet, "", "999999", h.searchDays)
+    assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestSearchEvaluatedDetails(t *testing.T) {
+    created := createSearch(t, searchWithDaysJSON("Ranged"))
+    defer dropSearch(created.ID)
+
+    assert.Equal(t, "Helsinki", created.EvaluatedPosition)
+    assert.Equal(t, 60.17, created.EvaluatedLat)
+    assert.Equal(t, 24.94, created.EvaluatedLon)
+    assert.Equal(t, 10.0, created.EvaluatedMinAlt)
+    assert.Equal(t, 360.0, created.EvaluatedMaxAz)
+
+    // An update rewrites them, so re-evaluating for a moved position
+    // does not leave the old coordinates behind.
+    body := `{"name":"Ranged","set_kind":"planets",` +
+	`"start_time":"22:00","end_time":"02:00",` +
+	`"visibility":"window","max_brightness":"NT",` +
+	`"evaluated_position":"Oulu",` +
+	`"evaluated_lat":65.01,"evaluated_lon":25.47,` +
+	`"evaluated_min_az":10,"evaluated_max_az":350,` +
+	`"evaluated_min_alt":5,"evaluated_max_alt":85,` +
+	`"candidates":[]}`
+    rec := searchRequest(t, http.MethodPut, body, fmt.Sprint(created.ID),
+	h.updateSearch)
+    assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+    stored := findSearch(t, created.ID)
+    assert.Equal(t, "Oulu", stored.EvaluatedPosition)
+    assert.Equal(t, 65.01, stored.EvaluatedLat)
+    assert.Equal(t, 5.0, stored.EvaluatedMinAlt)
+}
+
+// A search saved before the evaluation details existed reads back with
+// none, which is what keeps it from being reported stale.
+func TestSearchEvaluatedDetailsAbsent(t *testing.T) {
+    created := createSearch(t, searchJSON("Plain", "[]"))
+    defer dropSearch(created.ID)
+
+    assert.Equal(t, 0.0, created.EvaluatedLat)
+    assert.Equal(t, 0.0, created.EvaluatedLon)
+    assert.Equal(t, 0.0, created.EvaluatedMaxAlt)
+}
+
+func TestTargetObjectValidateDays(t *testing.T) {
+    // Three days of a four-hour window: day index 0..2, at most four
+    // hours, peak at most 240 minutes in.
+    cases := []struct {
+	name string
+	days Days
+	valid bool
+    }{
+	{"no records", Days{}, true},
+	{"first and last day", Days{{0, 4, 45, -20, 0}, {2, 4, 45, -20, 240}}, true},
+	{"sun limb above the zenith", Days{{0, 1, 45, 90.27, 0}}, true},
+	{"day index past the range", Days{{3, 1, 45, -20, 0}}, false},
+	{"negative day index", Days{{-1, 1, 45, -20, 0}}, false},
+	{"fractional day index", Days{{0.5, 1, 45, -20, 0}}, false},
+	{"negative hours", Days{{0, -1, 45, -20, 0}}, false},
+	{"hours longer than the window", Days{{0, 4.5, 45, -20, 0}}, false},
+	{"altitude too high", Days{{0, 1, 91, -20, 0}}, false},
+	{"altitude too low", Days{{0, 1, -91, -20, 0}}, false},
+	{"peak beyond the window", Days{{0, 1, 45, -20, 241}}, false},
+    }
+    for _, tc := range cases {
+	t.Run(tc.name, func(t *testing.T) {
+	    obj := TargetObject{Name: "Jupiter", SSObj: true, Days: tc.days}
+	    err := obj.ValidateDays(3, 4.0)
+	    if tc.valid {
+		assert.Nil(t, err)
+	    } else {
+		assert.NotNil(t, err)
+	    }
+	})
+    }
+}
+
+// A malformed record is rejected by the endpoint, not just the model.
+func TestCreateSearchBadDays(t *testing.T) {
+    body := `{"name":"Bad","set_kind":"planets",` +
+	`"start_time":"22:00","end_time":"02:00",` +
+	`"start_date":"2026-11-01","end_date":"2026-11-03",` +
+	`"visibility":"window","max_brightness":"NT","candidates":[` +
+	`{"name":"Jupiter","ss_obj":true,"matched":true,` +
+	`"days":[[7,3.5,45.2,-22.1,120]]}]}`
+    rec := searchRequest(t, http.MethodPost, body, "", h.createSearch)
+    assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+    assert.NotContains(t, searchNames(t), "Bad")
+}
+
+// Candidates times days is the real size limit.
+func manyCandidatesJSON(n int) string {
+    var b strings.Builder
+    for i := 0; i < n; i++ {
+	if i > 0 {
+	    b.WriteString(",")
+	}
+	fmt.Fprintf(&b, `{"name":"S%d","ra":%d,"dec":0}`, i, i%360)
+    }
+    return b.String()
+}
+
+func rangedSearchJSON(name string, end string, candidates string) string {
+    return `{"name":"` + name + `","set_kind":"messier",` +
+	`"start_time":"22:00","end_time":"02:00",` +
+	`"start_date":"2026-11-01","end_date":"` + end + `",` +
+	`"visibility":"window","max_brightness":"NT","candidates":[` +
+	candidates + `]}`
+}
+
+func TestCreateSearchCellLimit(t *testing.T) {
+    // An object list over a full year fits: 110 x 366 = 40260.
+    ok := createSearch(t, rangedSearchJSON("Year", "2027-11-01",
+	manyCandidatesJSON(110)))
+    defer dropSearch(ok.ID)
+    assert.Equal(t, 366, ok.DayCount())
+
+    // A larger list over the same year does not: 200 x 366 = 73200.
+    rec := searchRequest(t, http.MethodPost, rangedSearchJSON("Bad",
+	"2027-11-01", manyCandidatesJSON(200)), "", h.createSearch)
+    assert.Equal(t, http.StatusBadRequest, rec.Code)
+    assert.Contains(t, rec.Body.String(), "73200")
+    assert.Contains(t, rec.Body.String(), fmt.Sprint(MaxSearchCells))
+    assert.NotContains(t, searchNames(t), "Bad")
 }

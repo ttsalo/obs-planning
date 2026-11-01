@@ -55,6 +55,7 @@ func RegisterDBEndpoints(e *echo.Echo, r *echo.Group, DB *gorm.DB) error {
     r.POST("/searches", h.createSearch)
     r.PUT("/searches/:id", h.updateSearch)
     r.DELETE("/searches/:id", h.deleteSearch)
+    r.GET("/searches/:id/days", h.searchDays)
 
     return nil
 }
@@ -329,6 +330,7 @@ type TargetObjectInput struct {
     Magnitude *float64 `json:"magnitude"`
     ObjectType string `json:"object_type"`
     Matched bool `json:"matched"`
+    Days Days `json:"days"`
 }
 
 // The editable fields of a search plus its candidates. Like
@@ -348,6 +350,12 @@ type SearchInput struct {
     MaxBrightness string `json:"max_brightness"`
     EvaluatedAt *time.Time `json:"evaluated_at"`
     EvaluatedPosition string `json:"evaluated_position"`
+    EvaluatedLat float64 `json:"evaluated_lat"`
+    EvaluatedLon float64 `json:"evaluated_lon"`
+    EvaluatedMinAz float64 `json:"evaluated_min_az"`
+    EvaluatedMaxAz float64 `json:"evaluated_max_az"`
+    EvaluatedMinAlt float64 `json:"evaluated_min_alt"`
+    EvaluatedMaxAlt float64 `json:"evaluated_max_alt"`
     Candidates []TargetObjectInput `json:"candidates"`
 }
 
@@ -356,7 +364,9 @@ type SearchInput struct {
 // written too.
 var searchInputColumns = []any{"set_kind", "max_magnitude", "otype", "names",
     "start_time", "end_time", "start_date", "end_date", "visibility",
-    "max_brightness", "evaluated_at", "evaluated_position"}
+    "max_brightness", "evaluated_at", "evaluated_position",
+    "evaluated_lat", "evaluated_lon", "evaluated_min_az",
+    "evaluated_max_az", "evaluated_min_alt", "evaluated_max_alt"}
 
 // Copy the editable fields onto a search row, trimming the name and
 // the name list, and dropping the list and the object-type code for
@@ -383,22 +393,91 @@ func (in *SearchInput) applyTo(s *TargetSearch) {
     s.MaxBrightness = in.MaxBrightness
     s.EvaluatedAt = in.EvaluatedAt
     s.EvaluatedPosition = in.EvaluatedPosition
+    s.EvaluatedLat = in.EvaluatedLat
+    s.EvaluatedLon = in.EvaluatedLon
+    s.EvaluatedMinAz = in.EvaluatedMinAz
+    s.EvaluatedMaxAz = in.EvaluatedMaxAz
+    s.EvaluatedMinAlt = in.EvaluatedMinAlt
+    s.EvaluatedMaxAlt = in.EvaluatedMaxAlt
 }
 
 // The submitted candidates as rows for the given search, validated.
-func (in *SearchInput) candidateRows(searchID uint) ([]TargetObject, error) {
+// The search is needed whole, not just its id: a per-day record is
+// only meaningful against the day range and window it was evaluated
+// over.
+func (in *SearchInput) candidateRows(s *TargetSearch) ([]TargetObject, error) {
     rows := []TargetObject{}
+    dayCount, windowHours := s.DayCount(), s.WindowHours()
     for _, c := range in.Candidates {
-	obj := TargetObject{TargetSearchID: searchID,
+	obj := TargetObject{TargetSearchID: s.ID,
 	    Name: strings.TrimSpace(c.Name), SSObj: c.SSObj,
 	    RA: c.RA, Dec: c.Dec, Magnitude: c.Magnitude,
-	    ObjectType: c.ObjectType, Matched: c.Matched}
+	    ObjectType: c.ObjectType, Matched: c.Matched, Days: c.Days}
+	if obj.Days == nil {
+	    obj.Days = Days{}
+	}
 	if err := obj.Validate(); err != nil {
+	    return nil, err
+	}
+	if err := obj.ValidateDays(dayCount, windowHours); err != nil {
 	    return nil, err
 	}
 	rows = append(rows, obj)
     }
     return rows, nil
+}
+
+// One candidate's per-day records, as the days endpoint returns them.
+type ObjectDays struct {
+    ID uint `json:"id"`
+    Name string `json:"name"`
+    Days Days `json:"days"`
+}
+
+/* The per-day observability records of one of the current user's
+searches, for every candidate that has any.
+
+Served apart from the searches listing on purpose: a full year of an
+object list's records is about a megabyte, and the listing is refetched
+whenever the dialog opens or a mutation invalidates it. One search's
+grid is bounded by MaxSearchCells, so the calendar and the date-aware
+sky view can share a single fetch per search.
+
+start_date is empty for a definition with no day range. Such a search
+was evaluated for whichever night the application was showing, which is
+not recorded, so it has no range to place its one record in: the
+calendar has nothing to show and the sky view falls back to drawing
+every match whatever the date. */
+func (h *Handler) searchDays(c echo.Context) error {
+    ctx := context.Background()
+    db_user, resp := h.jwtUser(c)
+    if resp != nil {
+	return handled(resp)
+    }
+    search, resp := h.ownSearch(c, db_user.ID)
+    if resp != nil {
+	return handled(resp)
+    }
+    objects, err := gorm.G[TargetObject](h.DB).Where(
+	"target_search_id = ?", search.ID).Find(ctx)
+    if err != nil {
+	return c.JSON(http.StatusInternalServerError, err.Error())
+    }
+    records := []ObjectDays{}
+    for _, obj := range objects {
+	if len(obj.Days) == 0 {
+	    continue
+	}
+	records = append(records, ObjectDays{
+	    ID: obj.ID, Name: obj.Name, Days: obj.Days})
+    }
+    return c.JSON(http.StatusOK, map[string]any{
+	"start_date": search.StartDate,
+	"end_date": search.EndDate,
+	"day_count": search.DayCount(),
+	"window_hours": search.WindowHours(),
+	"objects": records,
+    })
 }
 
 // Does the user already have a search by this name? See
@@ -449,7 +528,10 @@ func (h *Handler) bindSearch(c echo.Context, search *TargetSearch,
     if err := search.Validate(); err != nil {
 	return nil, respond(c, http.StatusBadRequest, err.Error())
     }
-    rows, err := in.candidateRows(search.ID)
+    if err := search.ValidateSize(len(in.Candidates)); err != nil {
+	return nil, respond(c, http.StatusBadRequest, err.Error())
+    }
+    rows, err := in.candidateRows(search)
     if err != nil {
 	return nil, respond(c, http.StatusBadRequest, err.Error())
     }

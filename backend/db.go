@@ -6,6 +6,7 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "math"
     "os"
     "regexp"
     "strings"
@@ -101,6 +102,59 @@ func (n *Names) Scan(value any) error {
     return json.Unmarshal([]byte(text), n)
 }
 
+/* One day's observability record for a candidate, as a fixed-order
+array: the day's index into the search's day range, the hours the
+candidate qualified, the highest altitude it reached while qualifying,
+the darkest Sun upper-limb altitude it reached while qualifying, and
+the minutes from that day's window start to its altitude peak.
+
+An array rather than an object roughly halves what is stored and sent,
+which is what makes the cell limit affordable. The extremes are over
+qualifying samples only, so the altitude is the highest reached while
+the sky was dark enough rather than an independent maximum. */
+type DayRecord [5]float64
+
+const (
+    DayIndex = 0
+    DayHours = 1
+    DayMaxAlt = 2
+    DayDarkSun = 3
+    DayPeakMinutes = 4
+)
+
+// A candidate's per-day records, stored as a JSON array in a text
+// column for the same reason Names is: arrays on the API, one column
+// on both Postgres and SQLite.
+type Days []DayRecord
+
+func (d Days) Value() (driver.Value, error) {
+    if d == nil {
+	d = Days{}
+    }
+    b, err := json.Marshal(d)
+    return string(b), err
+}
+
+func (d *Days) Scan(value any) error {
+    var text string
+    switch v := value.(type) {
+    case nil:
+	*d = Days{}
+	return nil
+    case string:
+	text = v
+    case []byte:
+	text = string(v)
+    default:
+	return fmt.Errorf("Days: cannot scan %T", value)
+    }
+    if strings.TrimSpace(text) == "" {
+	*d = Days{}
+	return nil
+    }
+    return json.Unmarshal([]byte(text), d)
+}
+
 // The vocabulary of a search definition. A target set is one of the
 // kinds - messier, caldwell, herschel400, melotte and collinder are the
 // well-known object lists the astro backend keeps (astrobackend/lists.py)
@@ -164,6 +218,16 @@ type TargetSearch struct {
     MaxBrightness string `json:"max_brightness"`
     EvaluatedAt *time.Time `json:"evaluated_at"`
     EvaluatedPosition string `json:"evaluated_position"`
+    /* What the evaluation actually used, not just the position's name,
+    so a search whose position has since been edited can be told apart
+    from one that is still current. The window only matters when
+    visibility is "window"; the other criteria never consulted it. */
+    EvaluatedLat float64 `json:"evaluated_lat"`
+    EvaluatedLon float64 `json:"evaluated_lon"`
+    EvaluatedMinAz float64 `json:"evaluated_min_az"`
+    EvaluatedMaxAz float64 `json:"evaluated_max_az"`
+    EvaluatedMinAlt float64 `json:"evaluated_min_alt"`
+    EvaluatedMaxAlt float64 `json:"evaluated_max_alt"`
     TargetObjects []TargetObject
 }
 
@@ -180,6 +244,12 @@ type TargetObject struct {
     Magnitude *float64 `json:"magnitude"`
     ObjectType string `json:"object_type"`
     Matched bool `json:"matched"`
+    /* Per-day records, deliberately absent from this struct's JSON:
+    a search listing is shared by the header, the dialog and the sky
+    view, and a full year of a list's records would add about a
+    megabyte to every refetch. They are served by their own endpoint
+    instead. */
+    Days Days `json:"-" gorm:"type:text"`
 }
 
 // Check that a search definition makes sense: enum values, a magnitude
@@ -240,8 +310,8 @@ func (s *TargetSearch) Validate() error {
 	if end.Before(start) {
 	    return errors.New("End date must not be before the start date")
 	}
-	if end.Sub(start) > 30 * 24 * time.Hour {
-	    return errors.New("A day range can span at most 31 days")
+	if end.Sub(start) > 365 * 24 * time.Hour {
+	    return errors.New("A day range can span at most 366 days")
 	}
     }
     if !oneOf(s.Visibility, visibilities) {
@@ -255,6 +325,96 @@ func (s *TargetSearch) Validate() error {
 
 // Check a submitted candidate: a name, and for fixed objects
 // coordinates in range.
+/* Candidates times days: the real size limit on an evaluation, since
+it bounds both what one request computes and what is stored per
+search. Must match schemas.MAX_CELLS in the astro backend. 65000
+covers a full object list over a year (Messier is 110 x 366 = 40260)
+and keeps the largest set-and-range combination that was legal before
+per-day records existed (2000 x 31 = 62000). */
+const MaxSearchCells = 65000
+
+// Days in the search's day range; a definition without one is a
+// single day, the night the application was showing when it was
+// evaluated.
+func (s *TargetSearch) DayCount() int {
+    if s.StartDate == "" {
+	return 1
+    }
+    start, errStart := time.Parse("2006-01-02", s.StartDate)
+    end, errEnd := time.Parse("2006-01-02", s.EndDate)
+    if errStart != nil || errEnd != nil {
+	return 1
+    }
+    days := int(end.Sub(start).Hours() / 24) + 1
+    if days < 1 {
+	return 1
+    }
+    return days
+}
+
+// Length of one day's observing window in hours. An end that is not
+// after the start runs into the next day, as the definition says.
+func (s *TargetSearch) WindowHours() float64 {
+    start, errStart := time.Parse("15:04", s.StartTime)
+    end, errEnd := time.Parse("15:04", s.EndTime)
+    if errStart != nil || errEnd != nil {
+	return 24
+    }
+    span := end.Sub(start)
+    if span <= 0 {
+	span += 24 * time.Hour
+    }
+    return span.Hours()
+}
+
+// Reject a search whose candidate count times day count would exceed
+// what one evaluation may produce. Separate from Validate because only
+// the caller knows how many candidates came with the body.
+func (s *TargetSearch) ValidateSize(candidates int) error {
+    days := s.DayCount()
+    if cells := candidates * days; cells > MaxSearchCells {
+	return fmt.Errorf(
+	    "%d candidates over %d days is %d evaluations, more than the "+
+	    "%d that can be stored at once; use fewer objects or a "+
+	    "shorter range", candidates, days, cells, MaxSearchCells)
+    }
+    return nil
+}
+
+/* Check a candidate's per-day records against the search they belong
+to. The bounds are sanity checks on a client-supplied payload, not
+precision checks, so they carry a little slack: a Sun upper-limb
+altitude can exceed 90 degrees by the Sun's apparent radius where it
+passes through the zenith. */
+func (o *TargetObject) ValidateDays(dayCount int, windowHours float64) error {
+    for _, d := range o.Days {
+	index := d[DayIndex]
+	if index != math.Trunc(index) || index < 0 || int(index) >= dayCount {
+	    return fmt.Errorf(
+		"Day %v of %s is outside the search's %d day range",
+		index, o.Name, dayCount)
+	}
+	if d[DayHours] < 0 || d[DayHours] > windowHours+1e-6 {
+	    return fmt.Errorf(
+		"Qualifying hours %v of %s must be between 0 and the "+
+		"window's %v hours", d[DayHours], o.Name, windowHours)
+	}
+	if d[DayMaxAlt] < -90.001 || d[DayMaxAlt] > 90.001 {
+	    return fmt.Errorf("Peak altitude %v of %s must be between "+
+		"-90 and 90", d[DayMaxAlt], o.Name)
+	}
+	if d[DayDarkSun] < -91 || d[DayDarkSun] > 91 {
+	    return fmt.Errorf("Sun altitude %v of %s must be between "+
+		"-90 and 90", d[DayDarkSun], o.Name)
+	}
+	if d[DayPeakMinutes] < 0 || d[DayPeakMinutes] > windowHours*60+1e-6 {
+	    return fmt.Errorf("Peak offset %v of %s must fall inside the "+
+		"day's window", d[DayPeakMinutes], o.Name)
+	}
+    }
+    return nil
+}
+
 func (o *TargetObject) Validate() error {
     if strings.TrimSpace(o.Name) == "" {
 	return errors.New("Candidate name must not be empty")

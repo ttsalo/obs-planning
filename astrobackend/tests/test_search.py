@@ -1,12 +1,15 @@
 """Search resolution and filtering, offline: the SIMBAD seams in
 catalog.py are replaced with canned astropy tables."""
 
+from datetime import datetime
+
 import numpy as np
 import pytest
 from astropy.table import Table, MaskedColumn
 
 import catalog
 import lists
+import schemas
 import server
 
 
@@ -549,6 +552,17 @@ def filt(client, candidates, windows, visibility="horizon", brightness="D",
         "max_brightness": brightness})
 
 
+def flags(response):
+    """Just the match verdict, so the per-day records a response also
+    carries do not have to be spelled out in every assertion."""
+    return {k: response.json[k] for k in ("matched", "count")}
+
+
+def records(response, i=0):
+    """One candidate's per-window records."""
+    return response.json["days"][i]
+
+
 def test_filter_premise_brief_object(client):
     # Self-check of the fixture: below the horizon at the window's ends,
     # above it in the middle.
@@ -566,12 +580,13 @@ def test_filter_premise_brief_object(client):
 def test_filter_object_visible_only_mid_window(client):
     r = filt(client, [BRIEF], [NIGHT])
     assert r.status_code == 200
-    assert r.json == {"matched": [True], "count": 1}
+    assert flags(r) == {"matched": [True], "count": 1}
 
     # A window that ends before it rises.
     r = filt(client, [BRIEF], [{"start": "2025-12-10T18:00:00Z",
                                 "end": "2025-12-10T20:00:00Z"}])
-    assert r.json == {"matched": [False], "count": 0}
+    assert flags(r) == {"matched": [False], "count": 0}
+    assert records(r) == []
 
 
 def test_filter_never_dark_enough(client):
@@ -581,25 +596,80 @@ def test_filter_never_dark_enough(client):
     window = [{"start": "2025-06-21T19:00:00Z", "end": "2025-06-22T03:00:00Z"}]
     r = filt(client, [VEGA], window, visibility="none", brightness="NT",
              position=far_north)
-    assert r.json == {"matched": [False], "count": 0}
+    assert flags(r) == {"matched": [False], "count": 0}
+    assert records(r) == []
     # Same object and window with no brightness limit is fine.
     r = filt(client, [VEGA], window, visibility="none", brightness="D",
              position=far_north)
-    assert r.json == {"matched": [True], "count": 1}
+    assert flags(r) == {"matched": [True], "count": 1}
 
 
-def test_filter_no_criteria_short_circuit(client, monkeypatch):
-    def no_astro(*a, **kw):
-        raise AssertionError("no computation expected")
-    monkeypatch.setattr(server, "_candidates_altaz", no_astro)
+def test_filter_no_criteria_matches_everything(client):
+    # With neither criterion applied every candidate qualifies for the
+    # whole window, so each gets one record covering all six hours.
+    # Unlike before per-day records existed this cannot short-circuit
+    # the computation: a record reports the altitude and sky it saw.
     r = filt(client, [BRIEF, SOUTH, SUN], [NIGHT], visibility="none",
              brightness="D")
-    assert r.json == {"matched": [True, True, True], "count": 3}
+    assert flags(r) == {"matched": [True, True, True], "count": 3}
+    for day in r.json["days"]:
+        assert len(day) == 1
+        assert day[0][0] == 0
+        assert day[0][1] == pytest.approx(6.0)
+
+
+def test_filter_records_index_their_window(client):
+    # Brief rises during both nights and not during the daytime window
+    # between them, so it has records for windows 0 and 2 only.
+    night2 = {"start": "2025-12-11T20:30:00Z", "end": "2025-12-12T02:30:00Z"}
+    daytime = {"start": "2025-12-10T08:00:00Z", "end": "2025-12-10T10:00:00Z"}
+    r = filt(client, [BRIEF], [NIGHT, daytime, night2])
+    assert flags(r) == {"matched": [True], "count": 1}
+    assert [rec[0] for rec in records(r)] == [0, 2]
+
+
+def test_filter_record_metrics_cover_qualifying_only(client):
+    # A window from daylight into the night. Vega is highest while the
+    # sky is still bright, so a nautical-twilight limit must report the
+    # lower altitude it reaches once dark, at a different instant.
+    window = [{"start": "2025-12-10T09:00:00Z", "end": "2025-12-10T21:00:00Z"}]
+    unlimited = records(filt(client, [VEGA], window, visibility="none",
+                             brightness="D"))[0]
+    dark_only = records(filt(client, [VEGA], window, visibility="none",
+                             brightness="NT"))[0]
+    _, hours_d, alt_d, _, peak_d = unlimited
+    _, hours_nt, alt_nt, dark_nt, peak_nt = dark_only
+    assert hours_d == pytest.approx(12.0)      # the whole window
+    assert hours_nt < hours_d                  # only the dark part of it
+    assert alt_nt < alt_d                      # a lower peak, once dark
+    assert peak_nt > peak_d                    # and a later one
+    assert dark_nt < -6.0                      # darker than the limit
+
+
+def test_filter_duration_is_interpolated(client):
+    # Brief is above the horizon for part of the window, so its
+    # duration is not a whole number of 30-minute samples.
+    r = filt(client, [BRIEF], [NIGHT])
+    hours = records(r)[0][1]
+    assert hours % 0.5 != pytest.approx(0.0, abs=1e-6)
+    assert 4.0 < hours < 5.0
+
+
+def test_filter_duration_distinguishes_close_days(client):
+    # Two consecutive nights differ by a few minutes of visibility,
+    # well under the 30-minute sampling step, and must still differ.
+    night2 = {"start": "2025-12-11T20:30:00Z", "end": "2025-12-12T02:30:00Z"}
+    r = filt(client, [BRIEF], [NIGHT, night2])
+    first, second = (rec[1] for rec in records(r))
+    assert first != second
+    assert abs(first - second) < 0.5
 
 
 def test_filter_no_windows_matches_everything(client):
     r = filt(client, [SOUTH], [], visibility="window", brightness="N")
-    assert r.json == {"matched": [True], "count": 1}
+    assert flags(r) == {"matched": [True], "count": 1}
+    # Nothing to record: there is no window to record anything over.
+    assert records(r) == []
 
 
 def test_filter_multi_night(client):
@@ -615,7 +685,9 @@ def test_filter_flag_order_mixed_list(client):
     # Vega is circumpolar from Helsinki, the Sun is down at night, the
     # far-southern object never rises, and the brief one peeks up.
     r = filt(client, [VEGA, SUN, SOUTH, BRIEF], [NIGHT])
-    assert r.json == {"matched": [True, False, False, True], "count": 2}
+    assert flags(r) == {"matched": [True, False, False, True], "count": 2}
+    # Records sit in the same order, empty for the two that never qualify.
+    assert [len(d) for d in r.json["days"]] == [1, 0, 0, 1]
 
 
 def test_filter_observation_window(client):
@@ -669,7 +741,7 @@ def test_filter_needs_no_catalog(client, monkeypatch):
 def test_filter_samples_end_included(client, monkeypatch):
     seen = {}
 
-    def spy(candidates, times, loc):
+    def spy(candidates, times, loc, ss=None):
         seen["n"] = len(times)
         return np.full((len(candidates), len(times)), 10.0), \
             np.full((len(candidates), len(times)), 180.0)
@@ -683,12 +755,116 @@ def test_filter_samples_end_included(client, monkeypatch):
     assert seen["n"] == 4
 
 
+SS_BODIES = ["moon", "mercury", "venus", "mars", "jupiter", "saturn",
+             "uranus", "neptune"]
+
+
+def direct_altaz(names, times, loc):
+    """Per-body, per-sample altitude the way the other endpoints
+    compute it, as the reference for the interpolated path."""
+    return np.stack([np.asarray(server._compute_altaz(n, times, loc)[0].alt.deg)
+                     for n in names])
+
+
+def test_ss_altaz_matches_direct_evaluation():
+    # The interpolated, stacked ephemeris may not move any body enough
+    # to change whether it qualifies. 0.001 degrees is the contract;
+    # the Moon, the worst case, comes in near 0.0002.
+    from astropy.coordinates import EarthLocation
+    from astropy.time import Time
+    loc = EarthLocation.from_geodetic(lat=60.17, lon=24.94, height=0)
+    samples = []
+    for window in nightly_windows(180):
+        samples.extend(server._window_samples_one(
+            {"start": datetime.fromisoformat(window["start"][:-1]),
+             "end": datetime.fromisoformat(window["end"][:-1])}))
+    times = Time(samples)
+    got, _, _ = server._ss_altaz(SS_BODIES, times, loc)
+    reference = direct_altaz(SS_BODIES, times, loc)
+    errors = np.abs(got - reference).max(axis=1)
+    for name, err in zip(SS_BODIES, errors):
+        assert err < 0.001, f"{name} off by {err} degrees"
+
+
+def test_ss_altaz_matches_direct_evaluation_short_grid():
+    # A single window must be no worse: the node spacing sets the
+    # accuracy, not how long the range is.
+    from astropy.coordinates import EarthLocation
+    from astropy.time import Time
+    loc = EarthLocation.from_geodetic(lat=60.17, lon=24.94, height=0)
+    times = Time(server._window_samples_one(
+        {"start": datetime(2025, 12, 10, 20, 30),
+         "end": datetime(2025, 12, 11, 2, 30)}))
+    got, _, _ = server._ss_altaz(["moon", "sun"], times, loc)
+    reference = direct_altaz(["moon", "sun"], times, loc)
+    assert np.abs(got - reference).max() < 0.001
+
+
+def test_sun_upper_limb_follows_distance():
+    # The limb correction is taken per sample, so a range spanning
+    # perihelion and aphelion does not get one sample's radius.
+    near = server._sun_upper_limb(0.0, 147.1e6)
+    far = server._sun_upper_limb(0.0, 152.1e6)
+    assert near > far > 0.26
+    assert near - far > 0.008
+
+
+def test_catmull_rom_interpolation():
+    # Exact for a linear function, whatever the offset in the segment.
+    nodes = np.linspace(0.0, 10.0, 11)
+    targets = np.linspace(1.0, 9.0, 97)
+    got = server._catmull_rom(nodes, 3.0 * nodes + 1.0, targets)
+    assert np.abs(got - (3.0 * targets + 1.0)).max() < 1e-12
+    # Node values are reproduced at the nodes themselves.
+    assert np.allclose(server._catmull_rom(nodes, np.sin(nodes), nodes),
+                       np.sin(nodes), atol=1e-12)
+    # Third-order accurate on a smooth function: halving the node
+    # spacing cuts the error by about eight.
+    errors = []
+    for count in (21, 41, 81):
+        grid = np.linspace(0.0, 10.0, count)
+        errors.append(np.abs(server._catmull_rom(grid, np.sin(grid), targets)
+                             - np.sin(targets)).max())
+    for coarse, fine in zip(errors, errors[1:]):
+        assert coarse / fine > 6.0, (coarse, fine)
+    assert errors[-1] < 1e-4
+    # Leading axes are carried through, so a whole body's x, y, z
+    # interpolate in one call.
+    xyz = np.stack([np.sin(nodes), np.cos(nodes), 3.0 * nodes])
+    out = server._catmull_rom(nodes, xyz, targets)
+    assert out.shape == (3, len(targets))
+    assert np.abs(out[2] - 3.0 * targets).max() < 1e-12
+
+
+def stub_astro(monkeypatch, alt=10.0, az=180.0, sun=-20.0):
+    """Replace the astronomy with constants, for tests about validation
+    and bookkeeping rather than about positions."""
+    monkeypatch.setattr(server, "_candidates_altaz",
+                        lambda c, t, loc, ss=None: (
+                            np.full((len(c), len(t)), alt),
+                            np.full((len(c), len(t)), az)))
+    # A distance far enough away that the Sun's limb correction
+    # vanishes, so the stubbed altitude is the brightness the filter
+    # sees.
+    monkeypatch.setattr(server, "_ss_altaz", lambda names, t, loc: (
+        np.full((len(names), len(t)), sun),
+        np.full((len(names), len(t)), 180.0),
+        np.full((len(names), len(t)), 1.0e12)))
+
+
+def nightly_windows(n):
+    """n consecutive nightly windows, starting 2026-01-01."""
+    from datetime import datetime, timedelta as td
+    base = datetime(2026, 1, 1, 20, 0)
+    return [{"start": (base + td(days=d)).isoformat() + "Z",
+             "end": (base + td(days=d, hours=4)).isoformat() + "Z"}
+            for d in range(n)]
+
+
 def test_filter_validation(client):
     many = [{"start": f"2025-12-{d:02d}T20:00:00Z", "end": f"2025-12-{d:02d}T23:00:00Z"}
             for d in range(1, 32)]
     assert filt(client, [VEGA], many).status_code == 200
-    extra = [{"start": "2026-01-01T20:00:00Z", "end": "2026-01-01T23:00:00Z"}]
-    assert filt(client, [VEGA], many + extra).status_code == 400
 
     inverted = [{"start": "2025-12-11T02:30:00Z", "end": "2025-12-10T20:30:00Z"}]
     assert filt(client, [VEGA], inverted).status_code == 400
@@ -697,6 +873,29 @@ def test_filter_validation(client):
 
     crowd = [dict(VEGA, name=f"S{i}") for i in range(schemas_max() + 1)]
     assert filt(client, crowd, [NIGHT]).status_code == 400
+
+
+def test_filter_window_count_limit(client, monkeypatch):
+    stub_astro(monkeypatch)
+    # A full year of nightly windows is the longest range allowed.
+    assert filt(client, [VEGA], nightly_windows(366)).status_code == 200
+    assert filt(client, [VEGA], nightly_windows(367)).status_code == 400
+
+
+def test_filter_cell_limit(client, monkeypatch):
+    stub_astro(monkeypatch)
+    cands = lambda n: [dict(VEGA, name=f"S{i}") for i in range(n)]
+    # An object list over a full year fits: 110 x 366 = 40260.
+    assert filt(client, cands(110), nightly_windows(366)).status_code == 200
+    # So does the largest combination legal before per-day records
+    # existed: 2000 x 31 = 62000.
+    assert filt(client, cands(2000), nightly_windows(31)).status_code == 200
+    # A larger list over a year does not: 400 x 366 = 146400.
+    r = filt(client, cands(400), nightly_windows(366))
+    assert r.status_code == 400
+    assert r.json["error"] == "too_many"
+    for part in ("400", "366", "146400", str(schemas.MAX_CELLS)):
+        assert part in r.json["message"], part
 
     assert filt(client, [VEGA], [NIGHT], visibility="sometimes").status_code == 400
     assert filt(client, [VEGA], [NIGHT], brightness="dusk").status_code == 400

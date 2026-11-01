@@ -9,6 +9,7 @@ import { updateSession } from './session.jsx'
 import { useAstroBase } from './config.jsx'
 import { categoryOptions, categoryLabel, categoryGroup, currentCode,
 	 DEFAULT_CATEGORY } from './categories.js'
+import { isStale } from './observability.js'
 
 /* The user's saved searches. Shared by the dialog, the header and the
    sky view through one ["searches"] cache entry, so invalidating it
@@ -97,6 +98,12 @@ export function matchSummary(search) {
     const all = search.TargetObjects || [];
     const matched = all.filter((o) => o.matched).length;
     return `${matched} of ${all.length} match`;
+}
+
+// "2026-11-01 to 2027-04-29" for a ranged search, nothing otherwise.
+export function fmtRange(search) {
+    if (!search.start_date) return null;
+    return `${search.start_date} to ${search.end_date}`;
 }
 
 function fmtEvaluated(search) {
@@ -240,8 +247,14 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
     // The set's candidates: {setKey, list, unresolved}, or null when
     // they have to be (re)resolved.
     const [candidates, setCandidates] = useState(null);
-    // The criteria applied to those candidates: {flags, count,
-    // position}, or null until evaluated for the current definition.
+    /* The criteria applied to those candidates: {flags, count, days,
+       position}, or null until evaluated for the current definition.
+       `days` is one entry per candidate, each a list of that
+       candidate's per-day records; `position` is the whole position
+       the filtering used, which is saved with the search so a later
+       edit of that position can mark the result stale. Cleared by
+       onValuesChange with the rest, so a definition change discards
+       the records along with the flags. */
     const [matches, setMatches] = useState(null);
     const [formError, setFormError] = useState(null);
     const [listError, setListError] = useState(null);
@@ -271,6 +284,10 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 
     const onMutationSuccess = () => {
 	queryClient.invalidateQueries({queryKey: ["searches"]});
+	// The per-day records live on their own key, so the sky view
+	// and the calendar would otherwise keep showing the ones from
+	// before this save.
+	queryClient.invalidateQueries({queryKey: ["searchDays"]});
 	stopEditing();
     };
 
@@ -300,6 +317,7 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 	onSuccess: () => {
 	    setListError(null);
 	    queryClient.invalidateQueries({queryKey: ["searches"]});
+	    queryClient.invalidateQueries({queryKey: ["searchDays"]});
 	},
 	onError: (error) => setListError(errorMessage(error)),
     });
@@ -382,8 +400,13 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 		 visibility: def.visibility,
 		 max_brightness: def.max_brightness},
 		{timeout: 120 * 1000});
+	    /* The window index in each record is the day's offset from
+	       the definition's start date: buildWindows emits one
+	       window per day of the range, in order from it. For a
+	       definition with no day range there is one window, for
+	       the night the application is showing. */
 	    setMatches({flags: resp.data.matched, count: resp.data.count,
-			position: pos.name});
+			days: resp.data.days || [], position: pos});
 	} catch (error) {
 	    setFormError(errorMessage(error));
 	} finally {
@@ -394,12 +417,19 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
     const onFinish = (values) => {
 	if (candidates == null || matches == null) return;
 	const def = toDefinition(values);
+	const pos = matches.position;
 	const body = {
 	    ...def,
 	    evaluated_at: new Date().toISOString(),
-	    evaluated_position: matches.position,
+	    evaluated_position: pos.name,
+	    // What the filtering actually used, so a later edit of this
+	    // position shows the stored result as stale.
+	    evaluated_lat: pos.lat, evaluated_lon: pos.lon,
+	    evaluated_min_az: pos.min_az, evaluated_max_az: pos.max_az,
+	    evaluated_min_alt: pos.min_alt, evaluated_max_alt: pos.max_alt,
 	    candidates: candidates.list.map((c, i) => ({
-		...c, matched: !!matches.flags[i]})),
+		...c, matched: !!matches.flags[i],
+		days: matches.days[i] || []})),
 	};
 	setFormError(null);
 	if (editing == "new") {
@@ -448,9 +478,12 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 				       {s.name}
 				       {s.name == session?.search &&
 					<Tag color="blue">Selected</Tag>}
+				       {isStale(s, positions) &&
+					<Tag color="orange">Stale</Tag>}
 				   </Space>}
-			    description={`${setSummary(s)} · ${matchSummary(s)}`
-					 + ` · ${fmtEvaluated(s)}`}>
+			    description={[setSummary(s), matchSummary(s),
+					  fmtRange(s), fmtEvaluated(s)]
+					 .filter((p) => p).join(" · ")}>
 			</List.Item.Meta>
 		    </List.Item>}>
 	  </List>;
@@ -558,11 +591,11 @@ export function SearchesDialog({open, onClose, session, setSession, shownDate}) 
 		      </Form.Item>
 		  </Col>
 		  <Col span={8}>
-		      <Form.Item label="Days (optional, up to 31)" name="day_range"
+		      <Form.Item label="Days (optional, up to 366)" name="day_range"
 				 rules={[{validator: (_, v) =>
-				     !v || v[1].diff(v[0], 'day') <= 30
+				     !v || v[1].diff(v[0], 'day') <= 365
 					 ? Promise.resolve()
-					 : Promise.reject(new Error('At most 31 days'))}]}>
+					 : Promise.reject(new Error('At most 366 days'))}]}>
 			  <DatePicker.RangePicker style={{width: '100%'}}>
 			  </DatePicker.RangePicker>
 		      </Form.Item>

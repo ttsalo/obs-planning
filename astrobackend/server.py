@@ -17,6 +17,7 @@ from astropy import units as u
 from astropy.time import Time
 from astropy.coordinates import solar_system_ephemeris, EarthLocation, AltAz
 from astropy.coordinates import get_body, GeocentricMeanEcliptic, SkyCoord
+from astropy.coordinates import GCRS, CartesianRepresentation
 from astropy.utils import iers
 
 # Prevent astropy from downloading + CDS-parsing IERS_A on the WSGI
@@ -414,17 +415,24 @@ def resolve_targets():
          "unresolved": unresolved})), 200
 
 
+def _window_samples_one(window):
+    """Every 30 minutes from one window's start, the end instant
+    included; naive UTC datetimes. The last step may be short, so
+    callers must take interval lengths from the samples themselves."""
+    start, end = as_utc(window["start"]), as_utc(window["end"])
+    steps = int((end - start).total_seconds() // TS_STEP_SECONDS)
+    samples = [start + timedelta(seconds=k * TS_STEP_SECONDS)
+               for k in range(steps + 1)]
+    if samples[-1] != end:
+        samples.append(end)
+    return samples
+
+
 def _window_samples(windows):
-    """Every 30 minutes from each window's start, the end instant
-    included, concatenated over the windows; naive UTC datetimes."""
+    """Every window's samples concatenated; naive UTC datetimes."""
     samples = []
     for window in windows:
-        start, end = as_utc(window["start"]), as_utc(window["end"])
-        steps = int((end - start).total_seconds() // TS_STEP_SECONDS)
-        for k in range(steps + 1):
-            samples.append(start + timedelta(seconds=k * TS_STEP_SECONDS))
-        if samples[-1] != end:
-            samples.append(end)
+        samples.extend(_window_samples_one(window))
     return samples
 
 
@@ -450,8 +458,14 @@ def _check_candidates(candidates):
     return None
 
 
-def _candidates_altaz(candidates, times, loc):
-    """(n_obj, n_t) altitude and azimuth arrays for a mixed list."""
+def _candidates_altaz(candidates, times, loc, ss=None):
+    """(n_obj, n_t) altitude and azimuth arrays for a mixed list.
+
+    `ss` optionally supplies already-computed solar-system positions
+    for exactly these times, as (alt, az, row-index-by-name) from
+    _ss_altaz, so a long evaluation can compute the ephemeris once for
+    its whole range instead of once per window.
+    """
     n = len(candidates)
     alt = np.empty((n, len(times)))
     az = np.empty((n, len(times)))
@@ -463,11 +477,210 @@ def _candidates_altaz(candidates, times, loc):
         alt[fixed] = alts
         az[fixed] = azs
     for i, c in enumerate(candidates):
-        if c["ss_obj"]:
+        if not c["ss_obj"]:
+            continue
+        if ss is None:
             aa, _ = _compute_altaz(c["name"].lower(), times, loc)
             alt[i] = aa.alt.deg
             az[i] = aa.az.deg
+        else:
+            ss_alt, ss_az, row = ss
+            k = row[c["name"].lower()]
+            alt[i] = ss_alt[k]
+            az[i] = ss_az[k]
     return alt, az
+
+
+def _catmull_rom(nodes, values, targets):
+    """Cubic interpolation of `values` sampled at uniform `nodes`,
+    evaluated at `targets`.
+
+    `nodes` must be uniformly spaced and ascending; `values` is shaped
+    (..., len(nodes)) and interpolated along its last axis. Exact for a
+    linear function and third-order accurate for a smooth one, which is
+    ample for a body's geocentric position between daily nodes, and it
+    needs nothing but numpy — scipy is deliberately not a dependency
+    here (see the long-period-search design).
+
+    The two end segments reuse the end node as the missing neighbour,
+    so callers wanting full accuracy throughout should pad the node
+    grid by one node beyond each end of the targets.
+    """
+    nodes = np.asarray(nodes, dtype=float)
+    values = np.asarray(values, dtype=float)
+    n = len(nodes)
+    if n < 2:
+        raise ValueError("at least two nodes are needed")
+    step = (nodes[-1] - nodes[0]) / (n - 1)
+    # Fractional node index of each target, clamped into the last
+    # segment so a target exactly at the final node still has a
+    # segment to sit in.
+    pos = np.clip((np.asarray(targets, dtype=float) - nodes[0]) / step,
+                  0.0, n - 1 - 1e-12)
+    left = np.floor(pos).astype(int)
+    frac = pos - left
+
+    def node(offset):
+        return values[..., np.clip(left + offset, 0, n - 1)]
+
+    p0, p1, p2, p3 = node(-1), node(0), node(1), node(2)
+    f2 = frac * frac
+    f3 = f2 * frac
+    return 0.5 * (2.0 * p1
+                  + (-p0 + p2) * frac
+                  + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * f2
+                  + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * f3)
+
+
+def _circ_dist(a, b):
+    """Smallest absolute angular separation in degrees, 0 to 180."""
+    d = np.abs(np.asarray(a, dtype=float) - b) % 360.0
+    return np.minimum(d, 360.0 - d)
+
+
+def _az_margin(az, lo, hi):
+    """Signed degrees to the nearer azimuth limit: positive inside the
+    window, negative outside. The sign flips exactly where
+    _az_in_window does, so interpolating this to zero locates an
+    azimuth-limit crossing however the window wraps."""
+    inside = _az_in_window(np.asarray(az, dtype=float),
+                           {"min_az": lo, "max_az": hi})
+    d = np.minimum(_circ_dist(az, lo), _circ_dist(az, hi))
+    return np.where(inside, d, -d)
+
+
+# Stands in for an unbounded margin when a criterion is not applied.
+# A finite value keeps the duration arithmetic free of inf and nan.
+_WIDE_MARGIN = 1.0e6
+
+
+def _qualify_margin(alt, az, sun_alt, visibility, obs_window, threshold):
+    """Signed margin, strictly positive exactly where a candidate
+    qualifies, shaped like `alt`.
+
+    The minimum over the active criteria of each criterion's signed
+    distance from its own limit, in degrees. Using the same strict
+    comparisons as checkObsWindow in transitions.jsx means `> 0` is the
+    same predicate the single-flag filter used; interpolating the
+    margin to its zero crossing then locates the instant a candidate
+    enters or leaves qualification, whichever criterion crossed.
+    """
+    terms = []
+    if visibility == "window":
+        terms.append(alt - obs_window["min_alt"])
+        terms.append(obs_window["max_alt"] - alt)
+        terms.append(_az_margin(az, obs_window["min_az"],
+                                obs_window["max_az"]))
+    elif visibility == "horizon":
+        terms.append(alt - 0.0)
+    if threshold is not None:
+        terms.append(np.broadcast_to(threshold - np.asarray(sun_alt),
+                                     alt.shape))
+    if not terms:
+        return np.full(alt.shape, _WIDE_MARGIN)
+    out = terms[0]
+    for term in terms[1:]:
+        out = np.minimum(out, term)
+    return out
+
+
+def _qualifying_hours(margin, secs):
+    """Hours each candidate qualifies within one window.
+
+    `margin` is (n_obj, n_t), `secs` the (n_t - 1,) interval lengths.
+    Where an interval's endpoints straddle zero the crossing instant is
+    interpolated linearly in the margin, so a duration is not quantised
+    to the sampling step (OBS-19).
+    """
+    a, b = margin[:, :-1], margin[:, 1:]
+    qa, qb = a > 0, b > 0
+    denom = np.abs(a - b)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        entering = np.where(qb & ~qa, np.abs(b) / denom, 0.0)
+        leaving = np.where(qa & ~qb, np.abs(a) / denom, 0.0)
+    frac = np.where(qa & qb, 1.0, 0.0) + entering + leaving
+    return (frac * secs[np.newaxis, :]).sum(axis=1) / 3600.0
+
+
+def _window_records(margin, alt, sun_alt, secs, offsets):
+    """Per-candidate observability records for one window.
+
+    Yields (candidate index, hours, max altitude, darkest Sun altitude,
+    peak offset in minutes) for every candidate qualifying at one or
+    more samples. The extremes are taken over the qualifying samples
+    only, so the altitude is the highest reached while the sky was dark
+    enough rather than an independent maximum.
+    """
+    qualifying = margin > 0
+    hours = _qualifying_hours(margin, secs)
+    masked_alt = np.where(qualifying, alt, -np.inf)
+    peak = masked_alt.argmax(axis=1)
+    rows = np.arange(alt.shape[0])
+    max_alt = masked_alt[rows, peak]
+    sun_grid = np.broadcast_to(np.asarray(sun_alt), alt.shape)
+    darkest = np.where(qualifying, sun_grid, np.inf).min(axis=1)
+    for i in np.nonzero(qualifying.any(axis=1))[0]:
+        yield (int(i), round(float(hours[i]), 4),
+               round(float(max_alt[i]), 4), round(float(darkest[i]), 4),
+               round(float(offsets[peak[i]]), 2))
+
+
+# Ephemeris nodes per day for the filter endpoint's solar-system
+# positions. At this spacing the Moon, the fastest-moving body, comes
+# out within 0.0002 degrees of a direct per-sample evaluation and the
+# planets far closer. Lowering it degrades the Moon first; raising it
+# costs ephemeris time for no visible gain.
+EPH_NODES_PER_DAY = 4
+
+
+def _ss_altaz(names, times, loc):
+    """Altitude, azimuth and distance of solar-system bodies over a
+    sample grid: three (n_body, n_t) arrays, in `names` order.
+
+    `get_body` costs about 0.5 ms per body per sample, which a
+    year-long grid turns into over a minute — past the worker timeout.
+    So the ephemeris is evaluated on a coarse node grid and each
+    body's geocentric position interpolated to the samples, after
+    which every body is transformed to the observer's frame in one
+    call rather than one call each. Together those take the largest
+    permitted evaluation from about 79 seconds to about 15 (see the
+    long-period-search design).
+
+    Position is what gets interpolated, never altitude or azimuth:
+    those sweep 15 degrees an hour with the Earth's rotation, while a
+    body's geocentric position varies smoothly enough for daily nodes.
+    Distance is carried through the transform, so the observer's
+    parallax — about a degree for the Moon — and a body's apparent
+    radius stay exact rather than being approximated.
+    """
+    jd = np.atleast_1d(times.jd)
+    first, last = float(jd.min()), float(jd.max())
+    pad = 1.0 / EPH_NODES_PER_DAY
+    count = max(int(np.ceil((last - first) * EPH_NODES_PER_DAY)) + 4, 4)
+    nodes = Time(np.linspace(first - pad, last + pad, count), format="jd")
+    with solar_system_ephemeris.set("de432s"):
+        xyz = np.stack([
+            _catmull_rom(nodes.jd,
+                         get_body(name, nodes).cartesian.xyz.to_value(u.km),
+                         jd)
+            for name in names])                     # (n_body, 3, n_t)
+        rep = CartesianRepresentation(xyz.transpose(1, 0, 2) * u.km)
+        obstime = times[np.newaxis, :]
+        altaz = GCRS(rep, obstime=obstime).transform_to(
+            AltAz(obstime=obstime, location=loc))
+    return (np.asarray(altaz.alt.deg), np.asarray(altaz.az.deg),
+            np.asarray(altaz.distance.to_value(u.km)))
+
+
+def _sun_upper_limb(sun_alt_deg, sun_dist_km):
+    """Sun upper-limb altitude from its centre altitude and distance.
+
+    Vectorized over the samples, so the limb follows the Sun's own
+    distance through the year instead of one sample's value standing
+    in for a whole range."""
+    radius = np.degrees(np.arctan(
+        OBJ_RADII_KM["sun"] / np.asarray(sun_dist_km, dtype=float)))
+    return np.asarray(sun_alt_deg) + radius
 
 
 @app.route("/api/filter-targets", methods=['POST'], swag=True)
@@ -479,7 +692,18 @@ def filter_targets():
       Sample each observing window every 30 minutes (end included) and
       report, for each candidate, whether at any sample it is both
       visible per the visibility criterion and the sky is at most as
-      bright as the brightness limit. Never consults the catalog.
+      bright as the brightness limit. Alongside each matched flag the
+      response carries that candidate's per-window observability
+      records, one per window it qualifies in, each giving the window's
+      index, how long it qualified, the highest altitude and darkest sky
+      it reached while qualifying, and the minutes from the window's
+      start to its altitude peak. Durations are interpolated to the
+      instant qualification starts and ends, so they are not multiples
+      of the sampling step. A window a candidate never qualifies in has
+      no record, so a candidate with no records is one that did not
+      match. Windows are identified by position and times by offset, so
+      no wall-clock date or time zone appears in the response. Never
+      consults the catalog.
     parameters:
       - name: body
         in: body
@@ -489,7 +713,8 @@ def filter_targets():
           $ref: '#/definitions/FilterTargetsPost'
     responses:
       200:
-        description: One matched flag per candidate, in request order.
+        description: A matched flag and per-window records per candidate,
+          in request order.
         schema:
           $ref: '#/definitions/FilterTargetsResult'
       400:
@@ -510,36 +735,71 @@ def filter_targets():
     problem = _check_candidates(candidates)
     if problem is not None:
         return _error(400, "invalid", problem)
+    cells = len(candidates) * len(data["windows"])
+    if cells > schemas.MAX_CELLS:
+        return _error(400, "too_many",
+                      f"{len(candidates)} candidates over "
+                      f"{len(data['windows'])} days is {cells} evaluations, "
+                      f"more than the {schemas.MAX_CELLS} that can be done "
+                      f"at once. Use fewer objects or a shorter range.")
 
     n = len(candidates)
-    if n == 0 or not data["windows"] or (visibility == "none" and threshold is None):
+    if n == 0 or not data["windows"]:
+        # Nothing to compute: no candidates, or no window to compute
+        # them over. The second case keeps the long-standing rule that
+        # a filter with no windows matches everything, and is not
+        # reachable from the UI, which always builds at least one.
         return jsonify(filter_targets_result_schema.dump(
-            {"matched": [True] * n, "count": n})), 200
+            {"matched": [True] * n, "count": n,
+             "days": [[] for _ in range(n)]})), 200
 
     loc = EarthLocation.from_geodetic(lat=data["lat"], lon=data["lon"], height=0)
-    times = Time(_window_samples(data["windows"]))
 
-    alt, az = _candidates_altaz(candidates, times, loc)
+    per_window = [_window_samples_one(w) for w in data["windows"]]
+    bounds = np.cumsum([0] + [len(s) for s in per_window])
 
-    if visibility == "window":
-        visible = ((alt > obs_window["min_alt"]) & (alt < obs_window["max_alt"])
-                   & _az_in_window(az, obs_window))
-    elif visibility == "horizon":
-        visible = alt > 0
-    else:
-        visible = np.ones_like(alt, dtype=bool)
+    # The solar-system bodies are computed once over every window's
+    # samples at once, because the ephemeris cost is per body per
+    # sample and a coarse node grid spanning the whole range is what
+    # makes it affordable. The Sun is always among them: a record
+    # carries the darkest sky it saw whether or not the sky gated the
+    # match. The arrays are (bodies, samples) with at most nine
+    # bodies, so holding the range's worth costs nothing.
+    ss_names = ["sun"] + sorted({c["name"].lower() for c in candidates
+                                 if c["ss_obj"]} - {"sun"})
+    ss_row = {name: i for i, name in enumerate(ss_names)}
+    all_times = Time([t for samples in per_window for t in samples])
+    ss_alt, ss_az, ss_dist = _ss_altaz(ss_names, all_times, loc)
+    sun_limb = _sun_upper_limb(ss_alt[0], ss_dist[0])
 
-    if threshold is None:
-        dark = np.ones(len(times), dtype=bool)
-    else:
-        sun_aa, sun_dist_km = _compute_altaz("sun", times, loc)
-        sun_alt = sun_aa.alt.deg + _apparent_radius_deg("sun", sun_dist_km)
-        dark = np.asarray(sun_alt) < threshold
+    matched = np.zeros(n, dtype=bool)
+    days = [[] for _ in range(n)]
 
-    matched = (visible & dark[np.newaxis, :]).any(axis=1)
+    # Then one window at a time: the reduction is per window anyway,
+    # and the fixed objects, which are the many, are computed and
+    # reduced a window at a time so peak memory stays at one window's
+    # (candidates, samples) array however long the range is (OBS-19).
+    for index, samples in enumerate(per_window):
+        lo, hi = int(bounds[index]), int(bounds[index + 1])
+        times = Time(samples)
+        alt, az = _candidates_altaz(candidates, times, loc,
+                                    ss=(ss_alt[:, lo:hi], ss_az[:, lo:hi],
+                                        ss_row))
+        sun_alt = sun_limb[lo:hi]
+        margin = _qualify_margin(alt, az, sun_alt, visibility, obs_window,
+                                 threshold)
+        secs = np.array([(samples[k + 1] - samples[k]).total_seconds()
+                         for k in range(len(samples) - 1)])
+        offsets = np.array([(s - samples[0]).total_seconds() / 60.0
+                            for s in samples])
+        for i, hours, max_alt, darkest, peak in _window_records(
+                margin, alt, sun_alt, secs, offsets):
+            matched[i] = True
+            days[i].append([index, hours, max_alt, darkest, peak])
+
     return jsonify(filter_targets_result_schema.dump(
         {"matched": [bool(m) for m in matched],
-         "count": int(matched.sum())})), 200
+         "count": int(matched.sum()), "days": days})), 200
 
 
 @app.route("/api/get-objs", methods=['POST'], swag=True)
